@@ -1,7 +1,12 @@
 import asyncio
 import logging
 import os
-import pwd
+import sys  # Import sys module
+import locale  # 导入locale模块获取系统编码
+try:
+    import pwd
+except ImportError:
+    pwd = None # Define pwd as None if import fails
 import shlex
 import time
 from typing import IO, Any, Dict, List, Optional, Union
@@ -72,11 +77,53 @@ class ShellExecutor:
         return self.validator.validate_pipeline(commands)
 
     def _get_default_shell(self) -> str:
-        """Get the login shell of the current user"""
-        try:
-            return pwd.getpwuid(os.getuid()).pw_shell
-        except (ImportError, KeyError):
+        """Get the login shell of the current user, considering the OS."""
+        if sys.platform == "win32":
+            # On Windows, use COMSPEC environment variable or default to cmd.exe
+            return os.environ.get("COMSPEC", "cmd.exe")
+        else:
+            # On Unix-like systems, try pwd, then SHELL env var, then default to /bin/sh
+            if pwd: # Check if pwd was imported successfully
+                try:
+                    return pwd.getpwuid(os.getuid()).pw_shell
+                except KeyError:
+                    # Handle case where UID might not exist in pwd database
+                    pass
+            # Fallback for Unix-like systems
             return os.environ.get("SHELL", "/bin/sh")
+            
+    def _get_default_encoding(self) -> str:
+        """获取默认字符编码，按优先级查找配置
+        
+        优先顺序:
+        1. DEFAULT_ENCODING 环境变量
+        2. 当前终端/系统使用的字符集
+        3. 默认的 utf-8
+        
+        Returns:
+            str: 默认字符编码
+        """
+        # 1. 优先使用环境变量中配置的字符集
+        env_encoding = os.environ.get("DEFAULT_ENCODING")
+        if env_encoding:
+            return env_encoding
+            
+        # 2. 尝试获取终端/标准输出的编码
+        terminal_encoding = None
+        try:
+            if hasattr(sys.stdout, 'encoding') and sys.stdout.encoding:
+                terminal_encoding = sys.stdout.encoding
+            # 如果无法从标准输出获取，则尝试获取系统偏好编码
+            if not terminal_encoding:
+                terminal_encoding = locale.getpreferredencoding(False)
+        except (AttributeError, Exception):
+            pass
+            
+        if terminal_encoding:
+            return terminal_encoding
+            
+        # 3. 最后使用默认的 utf-8
+        return "utf-8"
 
     async def execute(
         self,
@@ -85,9 +132,14 @@ class ShellExecutor:
         stdin: Optional[str] = None,
         timeout: Optional[int] = None,
         envs: Optional[Dict[str, str]] = None,
+        encoding: Optional[str] = None,
     ) -> Dict[str, Any]:
         start_time = time.time()
         process = None  # Initialize process variable
+        
+        # 如果未提供encoding，使用默认获取方法
+        if encoding is None:
+            encoding = self._get_default_encoding()
 
         try:
             # Validate directory if specified
@@ -135,7 +187,7 @@ class ShellExecutor:
                         raise ValueError("Empty command before pipe operator")
 
                     return await self._execute_pipeline(
-                        commands, directory, timeout, envs
+                        commands, directory, timeout, envs, encoding
                     )
                 except ValueError as e:
                     return {
@@ -235,7 +287,13 @@ class ShellExecutor:
             # Execute the command with interactive shell
             shell = self._get_default_shell()
             shell_cmd = self.preprocessor.create_shell_command(cmd)
-            shell_cmd = f"{shell} -i -c {shlex.quote(shell_cmd)}"
+            # Adjust shell execution command based on OS
+            if sys.platform == "win32":
+                 # For cmd.exe, /c executes the command and then terminates
+                 shell_cmd = f'{shell} /c "{shell_cmd}"'
+            else:
+                 # For sh/bash, -i for interactive, -c for command string
+                 shell_cmd = f"{shell} -i -c {shlex.quote(shell_cmd)}"
 
             process = await self.process_manager.create_process(
                 shell_cmd, directory, stdout_handle=stdout_handle, envs=envs
@@ -277,8 +335,8 @@ class ShellExecutor:
 
                     return {
                         "error": None,
-                        "stdout": stdout.decode().strip() if stdout else "",
-                        "stderr": stderr.decode().strip() if stderr else "",
+                        "stdout": stdout.decode(encoding).strip() if stdout else "",
+                        "stderr": stderr.decode(encoding).strip() if stderr else "",
                         "returncode": final_returncode,
                         "status": process.returncode,
                         "execution_time": time.time() - start_time,
@@ -329,94 +387,84 @@ class ShellExecutor:
         directory: Optional[str] = None,
         timeout: Optional[int] = None,
         envs: Optional[Dict[str, str]] = None,
+        encoding: Optional[str] = None,
     ) -> Dict[str, Any]:
         start_time = time.time()
+        current_input = None
+        final_returncode = 0
+        
+        # 如果未提供encoding，使用默认获取方法
+        if encoding is None:
+            encoding = self._get_default_encoding()
+
+        # Validate all commands first
         try:
-            # Validate all commands before execution
             for cmd in commands:
-                # Make sure each command is allowed
-                self.validator.validate_command(cmd)
-
-            # Initialize IO variables
-            parsed_commands = []
-            first_stdin: Optional[bytes] = None
-            pipeline_stdout: Union[IO[Any], int, None] = None
-            first_redirects = None
-            last_redirects = None
-
-            # Process redirections for all commands
-            for i, command in enumerate(commands):
-                cmd, redirects = self.io_handler.process_redirections(command)
-                parsed_commands.append(cmd)
-
-                if i == 0:  # First command
-                    first_redirects = redirects
-                elif i == len(commands) - 1:  # Last command
-                    last_redirects = redirects
-
-            # Setup first and last command redirections
-            if first_redirects:
-                handles = await self.io_handler.setup_redirects(
-                    first_redirects, directory
-                )
-                stdin_data = handles.get("stdin_data")
-                if stdin_data:
-                    first_stdin = (
-                        stdin_data.encode() if isinstance(stdin_data, str) else None
-                    )
-
-            if last_redirects:
-                handles = await self.io_handler.setup_redirects(
-                    last_redirects, directory
-                )
-                stdout_value = handles.get("stdout")
-                pipeline_stdout = (
-                    stdout_value if isinstance(stdout_value, (IO, int)) else None
-                )
-
-            # Execute pipeline
-            try:
-                stdout, stderr, returncode = (
-                    await self.process_manager.execute_pipeline(
-                        [command[0] for command in parsed_commands],
-                        first_stdin=first_stdin,
-                        last_stdout=pipeline_stdout,
-                        directory=directory,
-                        timeout=timeout,
-                        envs=envs,
-                    )
-                )
-
-                final_output = stdout.decode("utf-8") if stdout else ""
-                final_stderr = stderr.decode("utf-8") if stderr else ""
-
-                return {
-                    "error": None,
-                    "stdout": final_output,
-                    "stderr": final_stderr,
-                    "status": returncode,
-                    "execution_time": time.time() - start_time,
-                    "directory": directory,
-                }
-
-            except Exception as e:
-                await self.process_manager.cleanup_processes([])
-                return {
-                    "error": str(e),
-                    "stdout": "",
-                    "stderr": str(e),
-                    "status": -1 if isinstance(e, TimeoutError) else 1,
-                    "execution_time": time.time() - start_time,
-                }
-
-            finally:
-                await self.io_handler.cleanup_handles({"stdout": pipeline_stdout})
-
-        except Exception as e:
+                if not cmd:
+                    return {
+                        "error": "Empty command in pipeline",
+                        "status": 1,
+                        "stdout": "",
+                        "stderr": "Empty command in pipeline",
+                        "execution_time": time.time() - start_time,
+                    }
+                self._validate_command(cmd)
+        except ValueError as e:
             return {
                 "error": str(e),
+                "status": 1,
                 "stdout": "",
                 "stderr": str(e),
-                "status": 1,
                 "execution_time": time.time() - start_time,
             }
+
+        # Process each command in the pipeline
+        for i, cmd in enumerate(commands):
+            # Last command in pipeline
+            is_last = i == len(commands) - 1
+
+            # Setup process
+            try:
+                shell = self._get_default_shell()
+                shell_cmd = self.preprocessor.create_shell_command(cmd)
+
+                process = await self.process_manager.create_process(
+                    shell_cmd, shell, directory, envs
+                )
+
+                stdout, stderr = await process.communicate(
+                    input=current_input.encode() if current_input else None
+                )
+
+                # Store output for next command
+                current_input = stdout.decode(encoding) if stdout else ""
+                if process.returncode != 0:
+                    final_returncode = process.returncode
+
+                # If this is the last command, collect stderr
+                if is_last:
+                    return {
+                        "error": None,
+                        "stdout": stdout.decode(encoding).strip() if stdout else "",
+                        "stderr": stderr.decode(encoding).strip() if stderr else "",
+                        "returncode": final_returncode,
+                        "status": process.returncode,
+                        "execution_time": time.time() - start_time,
+                    }
+            except Exception as e:
+                return {
+                    "error": str(e),
+                    "status": 1,
+                    "stdout": current_input if current_input else "",
+                    "stderr": str(e),
+                    "execution_time": time.time() - start_time,
+                }
+
+        # Fallback return in case something went wrong or the pipeline was empty
+        return {
+            "error": "Pipeline executed but produced no output",
+            "status": 1,
+            "stdout": current_input if current_input else "",
+            "stderr": "Pipeline executed but produced no output",
+            "execution_time": time.time() - start_time,
+        }

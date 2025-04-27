@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import traceback
+import tempfile
 from collections.abc import Sequence
 from typing import Any
 
@@ -49,12 +50,17 @@ class ExecuteToolHandler:
                     },
                     "directory": {
                         "type": "string",
-                        "description": "Working directory where the command will be executed",
+                        "description": f"Absolute path to the working directory where the command will be executed. Example: {__import__('os').getcwd()}",
+                        "examples": [__import__('os').getcwd()],
                     },
                     "timeout": {
                         "type": "integer",
                         "description": "Maximum execution time in seconds",
                         "minimum": 0,
+                    },
+                    "encoding": {
+                        "type": "string",
+                        "description": "Character encoding for command output (e.g. 'utf-8', 'gbk', 'cp936')",
                     },
                 },
                 "required": ["command", "directory"],
@@ -65,8 +71,9 @@ class ExecuteToolHandler:
         """Execute the shell command with the given arguments"""
         command = arguments.get("command", [])
         stdin = arguments.get("stdin")
-        directory = arguments.get("directory", "/tmp")  # default to /tmp for safety
+        directory = arguments.get("directory", tempfile.gettempdir())
         timeout = arguments.get("timeout")
+        encoding = arguments.get("encoding")  # 不提供默认值，让ShellExecutor处理默认编码逻辑
 
         if not command:
             raise ValueError("No command provided")
@@ -84,8 +91,8 @@ class ExecuteToolHandler:
             try:
                 result = await asyncio.wait_for(
                     self.executor.execute(
-                        command, directory, stdin, None
-                    ),  # Pass None for timeout
+                        command, directory, stdin, None, None, encoding
+                    ),
                     timeout=timeout,
                 )
             except asyncio.TimeoutError as e:
