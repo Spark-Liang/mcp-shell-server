@@ -101,14 +101,30 @@ class ExecuteToolHandler:
             if result.get("error"):
                 raise ValueError(result["error"])
 
+            content.append(TextContent(type="text", text=f"exit with {result.get('status')}"))
+
             # Add stdout if present
             if result.get("stdout"):
-                content.append(TextContent(type="text", text=result["stdout"]))
+                content.append(TextContent(
+                    type="text", 
+                    text=f"""---
+stdout:
+---
+{result.get("stdout")}
+"""
+                ))
 
             # Add stderr if present (filter out specific messages)
             stderr = result.get("stderr")
             if stderr and "cannot set terminal process group" not in stderr:
-                content.append(TextContent(type="text", text=stderr))
+                content.append(TextContent(
+                    type="text", 
+                    text=f"""---
+stderr:
+---
+{stderr}
+"""
+                ))
 
         except asyncio.TimeoutError as e:
             raise ValueError(f"Command timed out after {timeout} seconds") from e
