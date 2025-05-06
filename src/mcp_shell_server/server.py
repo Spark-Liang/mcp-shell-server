@@ -101,7 +101,7 @@ class ExecuteToolHandler:
             if result.get("error"):
                 raise ValueError(result["error"])
 
-            content.append(TextContent(type="text", text=f"exit with {result.get('status')}"))
+            content.append(TextContent(type="text", text=f"**exit with {result.get('status')}**"))
 
             # Add stdout if present
             if result.get("stdout"):
