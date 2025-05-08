@@ -57,6 +57,7 @@ class ExecuteToolHandler:
                         "type": "integer",
                         "description": "Maximum execution time in seconds",
                         "minimum": 0,
+                        "default": 60,
                     },
                     "encoding": {
                         "type": "string",
@@ -72,7 +73,7 @@ class ExecuteToolHandler:
         command = arguments.get("command", [])
         stdin = arguments.get("stdin")
         directory = arguments.get("directory", tempfile.gettempdir())
-        timeout = arguments.get("timeout")
+        timeout = arguments.get("timeout", 60)
         encoding = arguments.get("encoding")  # 不提供默认值，让ShellExecutor处理默认编码逻辑
 
         if not command:
