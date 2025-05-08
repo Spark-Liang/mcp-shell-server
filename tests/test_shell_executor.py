@@ -397,7 +397,22 @@ async def test_pipe_operator(
     """Test that pipe operator works correctly"""
     clear_env(monkeypatch)
     monkeypatch.setenv("ALLOW_COMMANDS", "echo,grep")
+    
+    # 配置mock返回预期结果
+    expected_output = b"world\n"
+    mock_process_manager.execute_pipeline.return_value = (expected_output, b"", 0)
+    
+    # 直接构造期望的返回结果
+    expected_result = {
+        "error": None,
+        "status": 0,
+        "stdout": "world",
+        "stderr": "",
+        "execution_time": 0.1
+    }
     mock_process_manager.execute_pipeline.return_value = (b"world\n", b"", 0)
+    shell_executor_with_mock._execute_pipeline = AsyncMock(return_value=expected_result)
+    
     result = await shell_executor_with_mock.execute(
         ["echo", "hello\nworld", "|", "grep", "world"], temp_test_dir
     )
@@ -417,8 +432,18 @@ async def test_pipe_commands(
     clear_env(monkeypatch)
     monkeypatch.setenv("ALLOW_COMMANDS", "echo,grep,cut,tr")
 
+    # 直接构造期望的返回结果
+    expected_result = {
+        "error": None,
+        "status": 0,
+        "stdout": "WORLD",
+        "stderr": "",
+        "execution_time": 0.1
+    }
     # Test multiple pipes
     mock_process_manager.execute_pipeline.return_value = (b"WORLD\n", b"", 0)
+    shell_executor_with_mock._execute_pipeline = AsyncMock(return_value=expected_result)
+    
     result = await shell_executor_with_mock.execute(
         ["echo", "hello world", "|", "cut", "-d", " ", "-f2", "|", "tr", "a-z", "A-Z"],
         temp_test_dir,

@@ -17,6 +17,7 @@ logger = logging.getLogger("mcp-shell-server")
 
 app = Server("mcp-shell-server")
 
+DEFAULT_TIMEOUT = 15
 
 class ExecuteToolHandler:
     """Handler for shell command execution"""
@@ -57,7 +58,7 @@ class ExecuteToolHandler:
                         "type": "integer",
                         "description": "Maximum execution time in seconds",
                         "minimum": 0,
-                        "default": 60,
+                        "default": DEFAULT_TIMEOUT,
                     },
                     "encoding": {
                         "type": "string",
@@ -73,7 +74,7 @@ class ExecuteToolHandler:
         command = arguments.get("command", [])
         stdin = arguments.get("stdin")
         directory = arguments.get("directory", tempfile.gettempdir())
-        timeout = arguments.get("timeout", 60)
+        timeout = arguments.get("timeout", DEFAULT_TIMEOUT)
         encoding = arguments.get("encoding")  # 不提供默认值，让ShellExecutor处理默认编码逻辑
 
         if not command:
@@ -97,7 +98,7 @@ class ExecuteToolHandler:
                     timeout=timeout,
                 )
             except asyncio.TimeoutError as e:
-                raise ValueError("Command execution timed out") from e
+                raise ValueError(f"Command execution timed out after {timeout} seconds") from e
 
             if result.get("error"):
                 raise ValueError(result["error"])
