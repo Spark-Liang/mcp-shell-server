@@ -7,10 +7,12 @@ import signal
 import uuid
 import tempfile
 from enum import Enum, auto
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Set, Any, Union, IO, Tuple, AsyncGenerator
 
 from pydantic import BaseModel, Field, field_validator
+
+from mcp_shell_server.output_manager import OutputManager
 
 logger = logging.getLogger("mcp-shell-server")
 
@@ -61,15 +63,16 @@ class BackgroundProcess:
         self.log_dir = os.path.join(tempfile.gettempdir(), f"mcp_shell_logs_{process_id}")
         os.makedirs(self.log_dir, exist_ok=True)
         
+        # 创建OutputManager实例
+        self._output_manager = OutputManager()
+        
         # 日志文件路径
         self.stdout_log = os.path.join(self.log_dir, "stdout.log")
         self.stderr_log = os.path.join(self.log_dir, "stderr.log")
         
-        # 创建空的日志文件
-        with open(self.stdout_log, 'w') as f:
-            pass
-        with open(self.stderr_log, 'w') as f:
-            pass
+        # 获取stdout和stderr的OutputLogger
+        self._stdout_logger = self._output_manager.get_logger(self.stdout_log)
+        self._stderr_logger = self._output_manager.get_logger(self.stderr_log)
         
         # 记录最后一次输出和错误输出的时间戳
         self.last_stdout_timestamp = None
@@ -111,7 +114,7 @@ class BackgroundProcess:
         return self.status == ProcessStatus.RUNNING
 
     def add_output(self, line: str) -> None:
-        """添加输出到标准输出日志文件
+        """添加输出到标准输出日志
         
         Args:
             line: 输出行
@@ -119,12 +122,11 @@ class BackgroundProcess:
         timestamp = datetime.now()
         self.last_stdout_timestamp = timestamp
         
-        # 写入到日志文件
-        with open(self.stdout_log, 'a', encoding=self.encoding) as f:
-            f.write(f"{timestamp.isoformat()}|{line}\n")
+        # 使用OutputLogger添加日志
+        self._stdout_logger.add_line(line)
     
     def add_error(self, line: str) -> None:
-        """添加错误输出到错误日志文件
+        """添加错误输出到错误日志
         
         Args:
             line: 错误输出行
@@ -132,9 +134,8 @@ class BackgroundProcess:
         timestamp = datetime.now()
         self.last_stderr_timestamp = timestamp
         
-        # 写入到日志文件
-        with open(self.stderr_log, 'a', encoding=self.encoding) as f:
-            f.write(f"{timestamp.isoformat()}|{line}\n")
+        # 使用OutputLogger添加日志
+        self._stderr_logger.add_line(line)
     
     def get_output(self, tail: Optional[int] = None, since: Optional[datetime] = None, until: Optional[datetime] = None) -> List[Dict[str, Any]]:
         """获取标准输出
@@ -147,51 +148,8 @@ class BackgroundProcess:
         Returns:
             输出列表
         """
-        result = []
-        try:
-            # 检查文件是否存在
-            if not os.path.exists(self.stdout_log):
-                return []
-                
-            # 读取日志文件
-            with open(self.stdout_log, 'r', encoding=self.encoding) as f:
-                lines = f.readlines()
-                
-            # 解析每一行
-            for line in lines:
-                if not line.strip():
-                    continue
-                    
-                try:
-                    # 分离时间戳和文本
-                    parts = line.strip().split('|', 1)
-                    if len(parts) != 2:
-                        continue
-                        
-                    timestamp_str, text = parts
-                    timestamp = datetime.fromisoformat(timestamp_str)
-                    
-                    # 应用过滤条件
-                    if since and timestamp < since:
-                        continue
-                    if until and timestamp > until:
-                        continue
-                        
-                    result.append({
-                        "timestamp": timestamp,
-                        "text": text
-                    })
-                except Exception as e:
-                    logger.warning(f"解析日志行时出错: {e}")
-                    
-            # 应用tail限制
-            if tail is not None and tail > 0:
-                result = result[-tail:]
-                
-            return result
-        except Exception as e:
-            logger.error(f"读取输出日志时出错: {e}")
-            return []
+        # 使用OutputLogger获取日志
+        return self._stdout_logger.get_logs(tail=tail, since=since, until=until)
     
     def get_error(self, tail: Optional[int] = None, since: Optional[datetime] = None, until: Optional[datetime] = None) -> List[Dict[str, Any]]:
         """获取错误输出
@@ -204,66 +162,22 @@ class BackgroundProcess:
         Returns:
             错误输出列表
         """
-        result = []
-        try:
-            # 检查文件是否存在
-            if not os.path.exists(self.stderr_log):
-                return []
-                
-            # 读取日志文件
-            with open(self.stderr_log, 'r', encoding=self.encoding) as f:
-                lines = f.readlines()
-                
-            # 解析每一行
-            for line in lines:
-                if not line.strip():
-                    continue
-                    
-                try:
-                    # 分离时间戳和文本
-                    parts = line.strip().split('|', 1)
-                    if len(parts) != 2:
-                        continue
-                        
-                    timestamp_str, text = parts
-                    timestamp = datetime.fromisoformat(timestamp_str)
-                    
-                    # 应用过滤条件
-                    if since and timestamp < since:
-                        continue
-                    if until and timestamp > until:
-                        continue
-                        
-                    result.append({
-                        "timestamp": timestamp,
-                        "text": text
-                    })
-                except Exception as e:
-                    logger.warning(f"解析日志行时出错: {e}")
-                    
-            # 应用tail限制
-            if tail is not None and tail > 0:
-                result = result[-tail:]
-                
-            return result
-        except Exception as e:
-            logger.error(f"读取错误日志时出错: {e}")
-            return []
+        # 使用OutputLogger获取日志
+        return self._stderr_logger.get_logs(tail=tail, since=since, until=until)
             
     def cleanup(self) -> None:
         """清理进程资源，包括日志文件"""
+        # 关闭OutputLogger
+        self._output_manager.close_all()
+        
         try:
-            # 移除日志文件目录
+            # 尝试移除日志目录
             if os.path.exists(self.log_dir):
-                # 移除目录中的所有文件
-                for filename in os.listdir(self.log_dir):
-                    file_path = os.path.join(self.log_dir, filename)
-                    if os.path.isfile(file_path):
-                        os.unlink(file_path)
-                # 移除目录
-                os.rmdir(self.log_dir)
+                # 如果目录存在（某些日志可能没有被OutputLogger清理），则尝试移除
+                if os.path.isdir(self.log_dir) and not any(os.scandir(self.log_dir)):
+                    os.rmdir(self.log_dir)
         except Exception as e:
-            logger.warning(f"清理日志文件时出错: {e}")
+            logger.warning(f"清理日志目录时出错: {e}")
 
 
 class BackgroundProcessManager:
@@ -276,6 +190,13 @@ class BackgroundProcessManager:
         self._original_sigint_handler = None
         self._original_sigterm_handler = None
         self._setup_signal_handlers()
+        
+        # 自动清理配置
+        self._auto_cleanup_task = None
+        self._auto_cleanup_interval = int(os.environ.get('MCP_SHELL_CLEANUP_INTERVAL', 1800))  # 默认30分钟
+        self._auto_cleanup_age = int(os.environ.get('PROCESS_RETENTION_SECONDS', 3600))  # 默认1小时
+        
+        # 注意：不在初始化时启动自动清理，而是在第一次添加进程时启动
 
     def _setup_signal_handlers(self) -> None:
         """设置信号处理器，用于优雅地管理进程。"""
@@ -310,7 +231,7 @@ class BackgroundProcessManager:
         )
         
     async def _read_stream(self, stream: asyncio.StreamReader, is_error: bool, bg_process: BackgroundProcess) -> None:
-        """持续读取流并存储到缓冲区。
+        """持续读取流并存储到日志。
         
         Args:
             stream: 要读取的流
@@ -318,6 +239,12 @@ class BackgroundProcessManager:
             bg_process: 后台进程对象
         """
         try:
+            # 缓存行以批量添加
+            buffer = []
+            buffer_size = 10  # 每次批量处理的行数
+            buffer_timeout = 0.5  # 缓冲区超时时间（秒）
+            last_flush_time = asyncio.get_event_loop().time()
+            
             while True:
                 line = await stream.readline()
                 if not line:  # EOF
@@ -325,18 +252,74 @@ class BackgroundProcessManager:
                     
                 try:
                     decoded_line = line.decode(bg_process.encoding, errors='replace').rstrip()
+                    buffer.append(decoded_line)
                     
-                    if is_error:
-                        bg_process.add_error(decoded_line)
-                    else:
-                        bg_process.add_output(decoded_line)
+                    # 达到缓冲区上限或超时时刷新
+                    current_time = asyncio.get_event_loop().time()
+                    if len(buffer) >= buffer_size or (current_time - last_flush_time) >= buffer_timeout:
+                        if is_error:
+                            # 批量添加错误输出
+                            if callable(getattr(bg_process._stderr_logger, "add_lines", None)):
+                                bg_process._stderr_logger.add_lines(buffer)
+                            else:
+                                # 如果无法批量添加，则单独添加每一行
+                                for line in buffer:
+                                    bg_process.add_error(line)
+                        else:
+                            # 批量添加标准输出
+                            if callable(getattr(bg_process._stdout_logger, "add_lines", None)):
+                                bg_process._stdout_logger.add_lines(buffer)
+                            else:
+                                # 如果无法批量添加，则单独添加每一行
+                                for line in buffer:
+                                    bg_process.add_output(line)
+                        
+                        # 清空缓冲区并更新最后刷新时间
+                        buffer = []
+                        last_flush_time = current_time
                         
                 except UnicodeDecodeError as e:
                     logger.warning(f"解码进程输出时出错: {e}")
+            
+            # 处理缓冲区中剩余的行
+            if buffer:
+                if is_error:
+                    # 批量添加错误输出
+                    if callable(getattr(bg_process._stderr_logger, "add_lines", None)):
+                        bg_process._stderr_logger.add_lines(buffer)
+                    else:
+                        for line in buffer:
+                            bg_process.add_error(line)
+                else:
+                    # 批量添加标准输出
+                    if callable(getattr(bg_process._stdout_logger, "add_lines", None)):
+                        bg_process._stdout_logger.add_lines(buffer)
+                    else:
+                        for line in buffer:
+                            bg_process.add_output(line)
                     
         except asyncio.CancelledError:
-            # 任务被取消，正常退出
-            pass
+            # 任务被取消，确保缓冲区中的行被处理
+            if buffer:
+                try:
+                    if is_error:
+                        if callable(getattr(bg_process._stderr_logger, "add_lines", None)):
+                            bg_process._stderr_logger.add_lines(buffer)
+                        else:
+                            for line in buffer:
+                                bg_process.add_error(line)
+                    else:
+                        if callable(getattr(bg_process._stdout_logger, "add_lines", None)):
+                            bg_process._stdout_logger.add_lines(buffer)
+                        else:
+                            for line in buffer:
+                                bg_process.add_output(line)
+                except Exception as e:
+                    logger.error(f"处理剩余输出时出错: {e}")
+            
+            # 正常退出
+            raise
+            
         except Exception as e:
             logger.error(f"读取进程输出时出错: {e}")
             
@@ -569,6 +552,9 @@ class BackgroundProcessManager:
             encoding=encoding,
             timeout=timeout,
         )
+        
+        # 启动自动清理任务
+        self.start_auto_cleanup()
         
         return bg_process.process_id
         
@@ -1023,6 +1009,9 @@ class BackgroundProcessManager:
 
     async def cleanup_all(self) -> None:
         """清理所有被跟踪的进程。"""
+        # 停止自动清理任务
+        await self.stop_auto_cleanup()
+        
         # 停止所有运行中的进程
         running_processes = [
             proc_id for proc_id, bg_proc in self._processes.items()
@@ -1107,3 +1096,77 @@ class BackgroundProcessManager:
             summary[process.status.value] += 1
             
         return summary
+
+    def start_auto_cleanup(self) -> None:
+        """启动自动清理任务，仅在有事件循环时启动"""
+        if self._auto_cleanup_interval <= 0:
+            return
+            
+        # 检查是否有运行中的事件循环
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            # 没有运行中的事件循环，不启动任务
+            logger.debug("没有检测到运行中的事件循环，自动清理任务暂不启动")
+            return
+            
+        if self._auto_cleanup_task is None or self._auto_cleanup_task.done():
+            self._auto_cleanup_task = asyncio.create_task(self._auto_cleanup_loop())
+            logger.info(f"启动后台进程自动清理任务，间隔: {self._auto_cleanup_interval}秒，进程保留时间: {self._auto_cleanup_age}秒")
+            
+    async def stop_auto_cleanup(self) -> None:
+        """停止自动清理任务"""
+        if self._auto_cleanup_task and not self._auto_cleanup_task.done():
+            self._auto_cleanup_task.cancel()
+            try:
+                await self._auto_cleanup_task
+            except asyncio.CancelledError:
+                pass
+            except Exception as e:
+                logger.warning(f"停止自动清理任务时出错: {e}")
+            self._auto_cleanup_task = None
+            logger.info("已停止后台进程自动清理任务")
+            
+    async def _auto_cleanup_loop(self) -> None:
+        """自动清理循环，定期清理已完成的旧进程"""
+        try:
+            while True:
+                await asyncio.sleep(self._auto_cleanup_interval)
+                await self.cleanup_old_processes()
+        except asyncio.CancelledError:
+            # 任务被取消，正常退出
+            pass
+        except Exception as e:
+            logger.error(f"后台进程自动清理任务出错: {e}")
+            
+    async def cleanup_old_processes(self) -> int:
+        """清理已完成且超过指定时间的进程
+        
+        Returns:
+            int: 被清理的进程数量
+        """
+        if self._auto_cleanup_age <= 0:
+            return 0
+            
+        # 计算清理时间阈值
+        cleanup_threshold = datetime.now() - timedelta(seconds=self._auto_cleanup_age)
+        
+        to_remove = []
+        for proc_id, bg_process in self._processes.items():
+            # 只清理非运行状态的进程
+            if bg_process.is_running():
+                continue
+                
+            # 检查进程结束时间是否超过阈值
+            if bg_process.end_time and bg_process.end_time < cleanup_threshold:
+                to_remove.append(proc_id)
+                
+        # 移除超时的进程
+        if to_remove:
+            logger.info(f"自动清理 {len(to_remove)} 个已完成的过期进程")
+            
+        for proc_id in to_remove:
+            await self.cleanup_process(proc_id)
+            del self._processes[proc_id]
+            
+        return len(to_remove)

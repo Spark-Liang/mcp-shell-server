@@ -68,86 +68,12 @@ class StartProcessArgs(BaseModel):
             raise ValueError(f"Directory '{v}' does not exist")
         return v
 
-
-class ListProcessesArgs(BaseModel):
-    """列出进程的参数模型"""
-    labels: Optional[List[str]] = Field(
-        default=None,
-        description="Filter processes by labels",
-    )
-    status: Optional[str] = Field(
-        default=None,
-        description="Filter processes by status ('running', 'completed', 'failed', 'terminated', 'error')",
-    )
-
-    @field_validator('status')
-    def validate_status(cls, v):
-        if v and v not in [status.value for status in ProcessStatus]:
-            raise ValueError(f"Status must be one of: {', '.join([status.value for status in ProcessStatus])}")
-        return v
-
-
-class StopProcessArgs(BaseModel):
-    """停止进程的参数模型"""
-    process_id: str = Field(
-        description="ID of the process to stop",
-    )
-    force: Optional[bool] = Field(
-        default=False,
-        description="Whether to force stop the process",
-    )
-
-
-class GetProcessOutputArgs(BaseModel):
-    """获取进程输出的参数模型"""
-    process_id: str = Field(
-        description="ID of the process to get output from",
-    )
-    tail: Optional[int] = Field(
-        default=None,
-        description="Number of lines to show from the end",
-        gt=0,  # greater than 0
-    )
-    since: Optional[datetime] = Field(
-        default=None,
-        description="Show logs since timestamp (e.g. '2021-01-01T00:00:00')",
-    )
-    until: Optional[datetime] = Field(
-        default=None,
-        description="Show logs until timestamp (e.g. '2021-01-01T00:00:00')",
-    )
-    error: Optional[bool] = Field(
-        default=False,
-        description="Show error output instead of standard output",
-    )
-    
-    # 模型验证，处理从JSON序列化时字符串到datetime的转换
-    @model_validator(mode='before')
-    @classmethod
-    def validate_timestamps(cls, values):
-        if isinstance(values, dict):
-            # 处理since字段
-            if 'since' in values and values['since'] and isinstance(values['since'], str):
-                try:
-                    values['since'] = datetime.fromisoformat(values['since'])
-                except ValueError:
-                    raise ValueError("'since' must be a valid ISO format datetime string (e.g. '2021-01-01T00:00:00')")
-                    
-            # 处理until字段
-            if 'until' in values and values['until'] and isinstance(values['until'], str):
-                try:
-                    values['until'] = datetime.fromisoformat(values['until'])
-                except ValueError:
-                    raise ValueError("'until' must be a valid ISO format datetime string (e.g. '2021-01-01T00:00:00')")
-        return values
-
-
 class StartBackgroundProcessToolHandler(ToolHandler[StartProcessArgs]):
     """启动后台进程的工具处理器"""
     
     @property
     def name(self) -> str:
-        return "bg_start"
+        return "shell_bg_start"
         
     @property
     def description(self) -> str:
@@ -189,12 +115,29 @@ class StartBackgroundProcessToolHandler(ToolHandler[StartProcessArgs]):
             raise ValueError(f"Error starting background process: {str(e)}")
 
 
+class ListProcessesArgs(BaseModel):
+    """列出进程的参数模型"""
+    labels: Optional[List[str]] = Field(
+        default=None,
+        description="Filter processes by labels",
+    )
+    status: Optional[str] = Field(
+        default=None,
+        description="Filter processes by status ('running', 'completed', 'failed', 'terminated', 'error')",
+    )
+
+    @field_validator('status')
+    def validate_status(cls, v):
+        if v and v not in [status.value for status in ProcessStatus]:
+            raise ValueError(f"Status must be one of: {', '.join([status.value for status in ProcessStatus])}")
+        return v
+
 class ListBackgroundProcessesToolHandler(ToolHandler[ListProcessesArgs]):
     """列出后台进程的工具处理器"""
     
     @property
     def name(self) -> str:
-        return "bg_list"
+        return "shell_bg_list"
         
     @property
     def description(self) -> str:
@@ -242,12 +185,23 @@ class ListBackgroundProcessesToolHandler(ToolHandler[ListProcessesArgs]):
             raise ValueError(f"Error listing background processes: {str(e)}")
 
 
+class StopProcessArgs(BaseModel):
+    """停止进程的参数模型"""
+    process_id: str = Field(
+        description="ID of the process to stop",
+    )
+    force: Optional[bool] = Field(
+        default=False,
+        description="Whether to force stop the process",
+    )
+
+
 class StopBackgroundProcessToolHandler(ToolHandler[StopProcessArgs]):
     """停止后台进程的工具处理器"""
     
     @property
     def name(self) -> str:
-        return "bg_stop"
+        return "shell_bg_stop"
         
     @property
     def description(self) -> str:
@@ -286,12 +240,67 @@ class StopBackgroundProcessToolHandler(ToolHandler[StopProcessArgs]):
             raise ValueError(f"Error stopping background process: {str(e)}")
 
 
+class GetProcessOutputArgs(BaseModel):
+    """获取进程输出的参数模型"""
+    process_id: str = Field(
+        description="ID of the process to get output from",
+    )
+    tail: Optional[int] = Field(
+        default=None,
+        description="Number of lines to show from the end",
+        gt=0,  # greater than 0
+    )
+    since: Optional[datetime] = Field(
+        default=None,
+        description="Show logs since timestamp (e.g. '2021-01-01T00:00:00')",
+    )
+    until: Optional[datetime] = Field(
+        default=None,
+        description="Show logs until timestamp (e.g. '2021-01-01T00:00:00')",
+    )
+    with_stdout: bool = Field(
+        default=True,
+        description="Show standard output",
+    )
+    with_stderr: bool = Field(
+        default=False,
+        description="Show error output",
+    )
+    add_time_prefix: bool = Field(
+        default=True,
+        description="Add timestamp prefix to each output line",
+    )
+    time_prefix_format: str = Field(
+        default="%Y-%m-%d %H:%M:%S.%f",
+        description="Format of the timestamp prefix, using strftime format",
+    )
+    
+    # 模型验证，处理从JSON序列化时字符串到datetime的转换
+    @model_validator(mode='before')
+    @classmethod
+    def validate_timestamps(cls, values):
+        if isinstance(values, dict):
+            # 处理since字段
+            if 'since' in values and values['since'] and isinstance(values['since'], str):
+                try:
+                    values['since'] = datetime.fromisoformat(values['since'])
+                except ValueError:
+                    raise ValueError("'since' must be a valid ISO format datetime string (e.g. '2021-01-01T00:00:00')")
+                    
+            # 处理until字段
+            if 'until' in values and values['until'] and isinstance(values['until'], str):
+                try:
+                    values['until'] = datetime.fromisoformat(values['until'])
+                except ValueError:
+                    raise ValueError("'until' must be a valid ISO format datetime string (e.g. '2021-01-01T00:00:00')")
+        return values
+
 class GetBackgroundProcessOutputToolHandler(ToolHandler[GetProcessOutputArgs]):
     """获取后台进程输出的工具处理器"""
     
     @property
     def name(self) -> str:
-        return "bg_logs"
+        return "shell_bg_logs"
         
     @property
     def description(self) -> str:
@@ -300,13 +309,47 @@ class GetBackgroundProcessOutputToolHandler(ToolHandler[GetProcessOutputArgs]):
     @property
     def argument_model(self) -> Type[GetProcessOutputArgs]:
         return GetProcessOutputArgs
+    
+    def _format_process_output(
+        self, 
+        output: List[Dict[str, Any]], 
+        stream_name: str, 
+        add_time_prefix: bool, 
+        time_prefix_format: str
+    ) -> TextContent:
+        """格式化进程输出"""
+        if output:
+            formatted_lines = []
+            for line in output:
+                if add_time_prefix:
+                    timestamp = line["timestamp"].strftime(time_prefix_format)
+                    formatted_lines.append(f"[{timestamp}] {line['text']}")
+                else:
+                    formatted_lines.append(line['text'])
+            
+            line_count = len(formatted_lines)
+            output_text = "\n".join(formatted_lines)
+            return TextContent(
+                type="text", 
+                text=f"---\n{stream_name}: {line_count} lines\n---\n{output_text}\n"
+            )
+        else:
+            return TextContent(
+                type="text",
+                text=f"---\n{stream_name}: 0 lines\n---\n"
+            )
         
     async def _do_run_tool(self, arguments: GetProcessOutputArgs) -> Sequence[TextContent]:
         process_id = arguments.process_id
         tail = arguments.tail
         since = arguments.since
         until = arguments.until
-        error = arguments.error
+        with_stdout = arguments.with_stdout
+        with_stderr = arguments.with_stderr
+        add_time_prefix = arguments.add_time_prefix
+        time_prefix_format = arguments.time_prefix_format
+        
+        content: List[TextContent] = []
         
         try:
             # 获取进程对象
@@ -318,10 +361,51 @@ class GetBackgroundProcessOutputToolHandler(ToolHandler[GetProcessOutputArgs]):
             cmd_str = " ".join(process.command)
             if len(cmd_str) > 50:
                 cmd_str = cmd_str[:47] + "..."
+            
+            # 添加进程信息作为第一个TextContent
+            status_info = f"**Process {process_id[:8]} (status: {process.status})**\n"
+            status_info += f"Command: {cmd_str}\n"
+            status_info += f"Description: {process.description}"
+            
+            # 添加状态信息
+            if process.status == ProcessStatus.RUNNING:
+                status_info += "\nStatus: Process is still running"
+            elif process.status == ProcessStatus.COMPLETED:
+                status_info += f"\nStatus: Process completed successfully with exit code {process.exit_code}"
+            else:
+                status_info += f"\nStatus: Process {process.status} with exit code {process.exit_code}"
                 
-            # 如果是查看错误输出
-            if error:
-                output = await background_process_manager.get_process_output(
+            content.append(TextContent(type="text", text=status_info))
+            
+            # 验证至少选择了一种输出类型
+            if not with_stdout and not with_stderr:
+                content.append(TextContent(
+                    type="text",
+                    text="---\nNo output requested. Set with_stdout=true or with_stderr=true to view logs.\n---"
+                ))
+                return content
+            
+            # 如果需要查看标准输出
+            if with_stdout:
+                # 获取标准输出
+                stdout_output = await background_process_manager.get_process_output(
+                    process_id=process_id,
+                    tail=tail,
+                    since_time=since.isoformat() if since else None,
+                    until_time=until.isoformat() if until else None,
+                    error=False
+                )
+                
+                content.append(self._format_process_output(
+                    stdout_output, 
+                    "stdout", 
+                    add_time_prefix, 
+                    time_prefix_format
+                ))
+                
+            # 如果需要查看错误输出
+            if with_stderr:
+                stderr_output = await background_process_manager.get_process_output(
                     process_id=process_id,
                     tail=tail,
                     since_time=since.isoformat() if since else None,
@@ -329,59 +413,15 @@ class GetBackgroundProcessOutputToolHandler(ToolHandler[GetProcessOutputArgs]):
                     error=True
                 )
                 
-                # 格式化输出
-                formatted_lines = []
-                for line in output:
-                    timestamp = line["timestamp"].strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
-                    formatted_lines.append(f"[{timestamp}] {line['text']}")
-                
-                # 构建消息内容
-                message_content = f"Error output from process {process_id[:8]} (status: {process.status}):\n"
-                message_content += f"Command: {cmd_str}\n"
-                message_content += f"Description: {process.description}\n\n"
-                
-                if formatted_lines:
-                    message_content += "\n".join(formatted_lines)
-                else:
-                    message_content += "No error output available"
-                    
-                return [TextContent(type="text", text=message_content)]
+                content.append(self._format_process_output(
+                    stderr_output, 
+                    "stderr", 
+                    add_time_prefix, 
+                    time_prefix_format
+                ))
             
-            # 如果是查看合并输出（标准输出+错误输出）
-            else:
-                output = await background_process_manager.get_all_output(
-                    process_id=process_id,
-                    tail=tail,
-                    since_time=since.isoformat() if since else None,
-                    until_time=until.isoformat() if until else None
-                )
                 
-                # 格式化输出
-                formatted_lines = []
-                for line in output:
-                    timestamp = line["timestamp"].strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
-                    stream_type = line["stream"]
-                    formatted_lines.append(f"[{timestamp}] [{stream_type}] {line['text']}")
-                
-                # 构建消息内容
-                message_content = f"Output from process {process_id[:8]} (status: {process.status}):\n"
-                message_content += f"Command: {cmd_str}\n"
-                message_content += f"Description: {process.description}\n\n"
-                
-                if formatted_lines:
-                    message_content += "\n".join(formatted_lines)
-                else:
-                    message_content += "No output available"
-                
-                # 添加运行状态信息
-                if process.status == "running":
-                    message_content += f"\n\nProcess is still running."
-                elif process.status == "completed":
-                    message_content += f"\n\nProcess completed successfully with exit code {process.exit_code}"
-                else:
-                    message_content += f"\n\nProcess {process.status} with exit code {process.exit_code}"
-                
-                return [TextContent(type="text", text=message_content)]
+            return content
                 
         except ValueError as e:
             raise ValueError(str(e))

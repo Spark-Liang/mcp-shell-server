@@ -94,7 +94,10 @@ def test_get_process_output_args_validation():
     assert args.tail is None
     assert args.since is None
     assert args.until is None
-    assert args.error is False
+    assert args.with_stdout is True
+    assert args.with_stderr is False
+    assert args.add_time_prefix is True
+    assert args.time_prefix_format == "%Y-%m-%d %H:%M:%S.%f"
     
     # 完整参数
     now = datetime.now()
@@ -105,13 +108,19 @@ def test_get_process_output_args_validation():
         tail=10,
         since=one_hour_ago,
         until=now,
-        error=True
+        with_stdout=False,
+        with_stderr=True,
+        add_time_prefix=False,
+        time_prefix_format="%H:%M:%S"
     )
     assert args.process_id == "test123"
     assert args.tail == 10
     assert args.since == one_hour_ago
     assert args.until == now
-    assert args.error is True
+    assert args.with_stdout is False
+    assert args.with_stderr is True
+    assert args.add_time_prefix is False
+    assert args.time_prefix_format == "%H:%M:%S"
     
     # 字符串日期转换
     args = GetProcessOutputArgs(
@@ -165,38 +174,80 @@ async def test_get_process_output_tool_handler():
         # 将方法变为异步模拟
         mock_manager.get_process = AsyncMock(return_value=mock_process)
         mock_manager.get_process_output = AsyncMock(return_value=output_data)
-        mock_manager.get_all_output = AsyncMock(return_value=output_data)
         
         # 测试标准输出
         args = GetProcessOutputArgs(
             process_id="test123",
-            since=datetime.now() - timedelta(hours=1)
+            since=datetime.now() - timedelta(hours=1),
+            with_stdout=True,
+            with_stderr=False
         )
         
         result = await handler._do_run_tool(args)
-        assert len(result) == 1
-        assert "Output from process" in result[0].text
-        
-        # 验证调用
-        mock_manager.get_all_output.assert_called_once()
-        call_args = mock_manager.get_all_output.call_args[1]
-        assert call_args["process_id"] == "test123"
-        assert call_args["since_time"] is not None  # 时间转换为ISO格式
-        
-        # 测试错误输出
-        mock_manager.get_all_output.reset_mock()
-        
-        args = GetProcessOutputArgs(
-            process_id="test123",
-            error=True
-        )
-        
-        result = await handler._do_run_tool(args)
-        assert len(result) == 1
-        assert "Error output from process" in result[0].text
+        assert len(result) == 2  # 现在返回两个TextContent
+        assert "Process test123" in result[0].text  # 第一个是进程信息
+        assert "stdout" in result[1].text  # 第二个是标准输出内容
         
         # 验证调用
         mock_manager.get_process_output.assert_called_once()
         call_args = mock_manager.get_process_output.call_args[1]
         assert call_args["process_id"] == "test123"
-        assert call_args["error"] is True 
+        assert call_args["since_time"] is not None  # 时间转换为ISO格式
+        assert call_args["error"] is False
+        
+        # 测试错误输出
+        mock_manager.get_process_output.reset_mock()
+        
+        args = GetProcessOutputArgs(
+            process_id="test123",
+            with_stdout=False,
+            with_stderr=True
+        )
+        
+        result = await handler._do_run_tool(args)
+        assert len(result) == 2  # 现在返回两个TextContent
+        assert "Process test123" in result[0].text  # 第一个是进程信息
+        assert "stderr" in result[1].text  # 第二个是错误输出内容
+        
+        # 验证调用
+        mock_manager.get_process_output.assert_called_once()
+        call_args = mock_manager.get_process_output.call_args[1]
+        assert call_args["process_id"] == "test123"
+        assert call_args["error"] is True
+        
+        # 测试同时获取标准输出和错误输出
+        mock_manager.get_process_output.reset_mock()
+        
+        args = GetProcessOutputArgs(
+            process_id="test123",
+            with_stdout=True,
+            with_stderr=True
+        )
+        
+        result = await handler._do_run_tool(args)
+        assert len(result) == 3  # 返回三个TextContent(进程信息、stderr、stdout)
+        assert "Process test123" in result[0].text  # 第一个是进程信息
+        assert "stdout:" in result[1].text  # 第二个是标准输出
+        assert "stderr:" in result[2].text  # 第三个是错误输出
+        
+        
+        # 验证调用
+        # 现在会调用 get_process_output 两次，一次用于 stderr，一次用于 stdout
+        assert mock_manager.get_process_output.call_count == 2
+        
+        # 测试无时间前缀
+        mock_manager.get_process_output.reset_mock()
+        
+        args = GetProcessOutputArgs(
+            process_id="test123",
+            with_stdout=True,
+            with_stderr=False,
+            add_time_prefix=False
+        )
+        
+        result = await handler._do_run_tool(args)
+        assert len(result) == 2  # 进程信息和标准输出
+        assert "stdout:" in result[1].text  # 输出标题格式正确
+        assert "lines" in result[1].text  # 包含行数信息
+        assert "Test output" in result[1].text  # 输出中包含文本
+        assert "[" not in result[1].text.split("---\n")[2]  # 确认内容部分没有时间戳前缀 
