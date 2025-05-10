@@ -56,7 +56,7 @@ class ExecuteToolHandler(ToolHandler[ShellExecuteArgs]):
     def description(self) -> str:
         base_description = "Execute a shell command"
         allowed_commands = self.get_allowed_commands()
-        return f"{base_description}\nAllowed commands: {', '.join(allowed_commands)}"
+        return f"{base_description}.\nAllowed commands: {', '.join(allowed_commands)}"
 
     @property
     def argument_model(self) -> Type[ShellExecuteArgs]:

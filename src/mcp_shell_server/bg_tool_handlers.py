@@ -77,7 +77,8 @@ class StartBackgroundProcessToolHandler(ToolHandler[StartProcessArgs]):
         
     @property
     def description(self) -> str:
-        return "Start a command in background and return its ID"
+        from .shell_executor import ShellExecutor
+        return f"Start a command in background and return its ID. Allowed commands: {', '.join(ShellExecutor().validator.get_allowed_commands())}"
         
     @property
     def argument_model(self) -> Type[StartProcessArgs]:
