@@ -5,6 +5,8 @@ Provides validation for shell commands and ensures they are allowed to be execut
 import os
 from typing import Dict, List
 
+from mcp_shell_server.env_name_const import ALLOW_COMMANDS, ALLOWED_COMMANDS
+
 
 class CommandValidator:
     """
@@ -19,8 +21,8 @@ class CommandValidator:
 
     def _get_allowed_commands(self) -> set[str]:
         """Get the set of allowed commands from environment variables"""
-        allow_commands = os.environ.get("ALLOW_COMMANDS", "")
-        allowed_commands = os.environ.get("ALLOWED_COMMANDS", "")
+        allow_commands = os.environ.get(ALLOW_COMMANDS, "")
+        allowed_commands = os.environ.get(ALLOWED_COMMANDS, "")
         commands = allow_commands + "," + allowed_commands
         return {cmd.strip() for cmd in commands.split(",") if cmd.strip()}
 

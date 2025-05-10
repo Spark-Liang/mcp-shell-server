@@ -16,6 +16,7 @@ from mcp_shell_server.command_validator import CommandValidator
 from mcp_shell_server.directory_manager import DirectoryManager
 from mcp_shell_server.io_redirection_handler import IORedirectionHandler
 from mcp_shell_server.process_manager import ProcessManager
+from mcp_shell_server.env_name_const import COMSPEC, SHELL, DEFAULT_ENCODING
 
 
 class ShellExecutor:
@@ -80,7 +81,7 @@ class ShellExecutor:
         """Get the login shell of the current user, considering the OS."""
         if sys.platform == "win32":
             # On Windows, use COMSPEC environment variable or default to cmd.exe
-            return os.environ.get("COMSPEC", "cmd.exe")
+            return os.environ.get(COMSPEC, "cmd.exe")
         else:
             # On Unix-like systems, try pwd, then SHELL env var, then default to /bin/sh
             if pwd: # Check if pwd was imported successfully
@@ -90,7 +91,7 @@ class ShellExecutor:
                     # Handle case where UID might not exist in pwd database
                     pass
             # Fallback for Unix-like systems
-            return os.environ.get("SHELL", "/bin/sh")
+            return os.environ.get(SHELL, "/bin/sh")
             
     def _get_default_encoding(self) -> str:
         """获取默认字符编码，按优先级查找配置
@@ -104,7 +105,7 @@ class ShellExecutor:
             str: 默认字符编码
         """
         # 1. 优先使用环境变量中配置的字符集
-        env_encoding = os.environ.get("DEFAULT_ENCODING")
+        env_encoding = os.environ.get(DEFAULT_ENCODING)
         if env_encoding:
             return env_encoding
             
