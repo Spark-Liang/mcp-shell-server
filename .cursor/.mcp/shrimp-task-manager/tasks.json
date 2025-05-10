@@ -1,0 +1,153 @@
+{
+  "tasks": [
+    {
+      "id": "f2bf2d5d-7a4b-4e03-8682-48cf51a70797",
+      "name": "创建 BackgroundProcess 类",
+      "description": "实现 BackgroundProcess 类作为后台进程的数据模型，存储进程ID、命令、目录、描述、标签、状态等信息，并提供访问和管理这些属性的方法。",
+      "status": "待處理",
+      "dependencies": [],
+      "createdAt": "2025-05-10T01:25:01.640Z",
+      "updatedAt": "2025-05-10T01:25:01.640Z",
+      "implementationGuide": "创建 BackgroundProcess 类，包含以下属性：\n- process_id：UUID 作为唯一标识\n- command：命令列表\n- directory：工作目录\n- description：命令描述\n- labels：标签列表\n- process：实际的 asyncio.subprocess.Process 对象\n- start_time：启动时间\n- output_buffer/error_buffer：输出和错误缓冲区\n- status：进程状态（running/completed/failed/cancelled）\n- exit_code：退出码\n- end_time：结束时间\n- monitor_task：监控任务引用",
+      "verificationCriteria": "- 类创建正确\n- 所有属性可正确初始化\n- 默认值设置合理\n- 文档注释齐全"
+    },
+    {
+      "id": "a698a632-8939-4625-a279-3f0a7d5afc48",
+      "name": "创建 BackgroundProcessManager 基础结构和信号处理",
+      "description": "实现 BackgroundProcessManager 类的基础结构，包括初始化方法、信号处理机制和进程创建方法。",
+      "status": "待處理",
+      "dependencies": [],
+      "createdAt": "2025-05-10T01:25:01.640Z",
+      "updatedAt": "2025-05-10T01:25:01.640Z",
+      "relatedFiles": [
+        {
+          "path": "src/mcp_shell_server/process_manager.py",
+          "type": "REFERENCE",
+          "description": "参考文件，包含现有的进程管理实现"
+        }
+      ],
+      "implementationGuide": "参考现有的 ProcessManager 类，实现 BackgroundProcessManager 类的基础功能：\n- 初始化方法，创建进程字典\n- _setup_signal_handlers 方法，设置信号处理器以确保进程正确清理\n- create_process 方法，用于创建新的子进程\n\n这些代码可以从 ProcessManager 类中参考实现。",
+      "verificationCriteria": "- 类初始化正确\n- 信号处理器设置正确\n- create_process 方法能正确创建进程"
+    },
+    {
+      "id": "7e4751ea-67f9-40e4-9f6b-d0862fd479d9",
+      "name": "实现进程输出捕获和监控机制",
+      "description": "实现异步读取进程输出的功能，以及用于监控进程状态变化的任务。",
+      "status": "待處理",
+      "dependencies": [],
+      "createdAt": "2025-05-10T01:25:01.640Z",
+      "updatedAt": "2025-05-10T01:25:01.640Z",
+      "implementationGuide": "实现以下方法：\n1. _read_stream：用于持续读取进程输出流，并将输出存储在缓冲区中\n2. _monitor_process：用于监控进程状态，捕获进程退出，以及管理输出流读取任务\n\n关键点：\n- 使用异步IO读取流数据\n- 为输出添加时间戳\n- 限制缓冲区大小防止内存溢出\n- 处理异常和任务取消情况",
+      "verificationCriteria": "- 能正确读取和存储进程输出\n- 能正确处理进程状态变化\n- 在进程退出或监控任务取消时能正确清理资源\n- 异常处理完善"
+    },
+    {
+      "id": "b62d8a8a-25f0-4c80-a104-55b2afe27582",
+      "name": "实现后台进程管理核心功能",
+      "description": "实现 BackgroundProcessManager 的核心功能，包括启动进程、列出进程、停止进程和获取进程输出等方法。",
+      "status": "待處理",
+      "dependencies": [
+        {
+          "taskId": "f2bf2d5d-7a4b-4e03-8682-48cf51a70797"
+        },
+        {
+          "taskId": "a698a632-8939-4625-a279-3f0a7d5afc48"
+        },
+        {
+          "taskId": "7e4751ea-67f9-40e4-9f6b-d0862fd479d9"
+        }
+      ],
+      "createdAt": "2025-05-10T01:25:01.640Z",
+      "updatedAt": "2025-05-10T01:33:33.286Z",
+      "implementationGuide": "实现以下方法：\n1. start_process：启动一个后台进程并返回其ID\n   ```python\n   async def start_process(self, cmd, directory, description, labels=None, stdin=None, envs=None, timeout=None):\n       \"\"\"启动一个后台进程并返回其ID\n       \n       Args:\n           cmd (List[str]): 命令列表\n           directory (str): 工作目录\n           description (str): 命令描述(必填)\n           labels (List[str], optional): 标签列表\n           stdin (str, optional): 标准输入\n           envs (Dict[str, str], optional): 环境变量\n           timeout (int, optional): 超时时间(秒)\n           \n       Returns:\n           str: 进程ID\n       \"\"\"\n       # 创建唯一ID\n       process_id = str(uuid.uuid4())\n       \n       # 创建进程\n       process = await self.create_process(\n           \" \".join(cmd),\n           directory=directory,\n           stdin=stdin,\n           envs=envs\n       )\n       \n       # 创建后台进程对象\n       bg_process = BackgroundProcess(\n           process_id=process_id,\n           command=cmd,\n           directory=directory,\n           description=description,\n           labels=labels,\n           process=process\n       )\n       \n       # 保存进程\n       self._processes[process_id] = bg_process\n       \n       # 启动监控任务\n       bg_process.monitor_task = asyncio.create_task(\n           self._monitor_process(bg_process)\n       )\n       \n       return process_id\n   ```\n2. list_processes：列出正在运行的进程，支持按标签过滤\n3. stop_process：停止指定的进程，支持强制停止\n4. get_process_output：获取进程的输出，支持tail、since等过滤条件\n5. cleanup_processes：清理已完成的进程\n6. cleanup_all：清理所有进程\n\n每个方法都需要处理各种边缘情况和错误情况。",
+      "verificationCriteria": "- 所有方法功能正确\n- 边缘情况处理完善\n- 错误处理完善\n- 资源管理正确"
+    },
+    {
+      "id": "14cfe7ee-b1c9-4331-8b5e-58c1e1684513",
+      "name": "创建 Pydantic 参数模型",
+      "description": "创建用于MCP工具接口的Pydantic参数模型，定义每个工具接口所需的参数和验证规则。",
+      "status": "待處理",
+      "dependencies": [],
+      "createdAt": "2025-05-10T01:25:01.640Z",
+      "updatedAt": "2025-05-10T01:33:22.940Z",
+      "implementationGuide": "创建以下Pydantic模型：\n1. StartProcessArgs：启动进程参数\n   ```python\n   class StartProcessArgs(BaseModel):\n       \"\"\"启动后台进程的参数模型\"\"\"\n       command: list[str] = Field(\n           description=\"Command and its arguments as array\",\n       )\n       directory: str = Field(\n           description=\"Absolute path to the working directory where the command will be executed\",\n       )\n       description: str = Field(\n           description=\"Description of the command (required)\",\n       )\n       labels: Optional[list[str]] = Field(\n           default=None,\n           description=\"Labels to categorize the command\",\n       )\n       stdin: Optional[str] = Field(\n           default=None,\n           description=\"Input to be passed to the command via stdin\",\n       )\n       envs: Optional[Dict[str, str]] = Field(\n           default=None,\n           description=\"Additional environment variables for the command\",\n       )\n       timeout: Optional[int] = Field(\n           default=None,\n           description=\"Maximum execution time in seconds\",\n           ge=0,  # greater than or equal to 0\n       )\n   ```\n2. ListProcessesArgs：列出进程参数\n3. StopProcessArgs：停止进程参数\n4. GetProcessOutputArgs：获取输出参数\n\n每个模型都应该使用Field属性定义描述、验证规则等。",
+      "verificationCriteria": "- 模型定义正确\n- 字段描述清晰\n- 验证规则合理\n- 默认值设置合理"
+    },
+    {
+      "id": "2427ff58-0939-4685-9e37-6b4c12d6a2fb",
+      "name": "实现MCP工具处理器类",
+      "description": "实现各种ToolHandler类，用于将BackgroundProcessManager的功能暴露为MCP工具。",
+      "status": "待處理",
+      "dependencies": [
+        {
+          "taskId": "14cfe7ee-b1c9-4331-8b5e-58c1e1684513"
+        },
+        {
+          "taskId": "b62d8a8a-25f0-4c80-a104-55b2afe27582"
+        }
+      ],
+      "createdAt": "2025-05-10T01:25:01.640Z",
+      "updatedAt": "2025-05-10T01:33:41.610Z",
+      "implementationGuide": "实现以下ToolHandler类：\n1. StartBackgroundProcessToolHandler：启动后台进程\n   ```python\n   class StartBackgroundProcessToolHandler(ToolHandler[StartProcessArgs]):\n       @property\n       def name(self) -> str:\n           return \"bg_start\"\n           \n       @property\n       def description(self) -> str:\n           return \"Start a command in background and return its ID\"\n           \n       @property\n       def argument_model(self) -> Type[StartProcessArgs]:\n           return StartProcessArgs\n           \n       async def _do_run_tool(self, arguments: StartProcessArgs) -> Sequence[TextContent]:\n           command = arguments.command\n           directory = arguments.directory\n           description = arguments.description  # 现在是必填参数\n           labels = arguments.labels\n           stdin = arguments.stdin\n           envs = arguments.envs\n           timeout = arguments.timeout\n           \n           # 启动后台进程\n           process_id = await background_process_manager.start_process(\n               command, directory, description, labels, stdin, envs, timeout\n           )\n           \n           return [TextContent(\n               type=\"text\",\n               text=f\"Started background process with ID: {process_id}\"\n           )]\n   ```\n2. ListBackgroundProcessesToolHandler：列出后台进程\n3. StopBackgroundProcessToolHandler：停止后台进程\n4. GetBackgroundProcessOutputToolHandler：获取进程输出\n\n每个类都需要实现name、description、argument_model和_do_run_tool方法。",
+      "verificationCriteria": "- 所有工具处理器实现正确\n- 接口名称和描述清晰\n- 参数模型关联正确\n- 结果格式符合TextContent要求"
+    },
+    {
+      "id": "879bd14e-de7f-4503-bd1f-d45b1aa0ab22",
+      "name": "修改server.py以集成新功能",
+      "description": "修改server.py文件，将BackgroundProcessManager和ToolHandler类集成到MCP Shell Server中。",
+      "status": "待處理",
+      "dependencies": [
+        {
+          "taskId": "2427ff58-0939-4685-9e37-6b4c12d6a2fb"
+        }
+      ],
+      "createdAt": "2025-05-10T01:25:01.640Z",
+      "updatedAt": "2025-05-10T01:25:01.640Z",
+      "relatedFiles": [
+        {
+          "path": "src/mcp_shell_server/server.py",
+          "type": "TO_MODIFY",
+          "description": "需要修改的主服务器文件"
+        }
+      ],
+      "implementationGuide": "修改server.py，需要做以下更改：\n1. 创建BackgroundProcessManager实例\n2. 初始化所有ToolHandler实例\n3. 更新list_tools函数以返回所有工具\n4. 更新call_tool函数以支持调用新工具\n\n注意保持与现有代码风格一致，并确保错误处理完善。",
+      "verificationCriteria": "- 所有工具成功注册到MCP\n- list_tools返回所有工具\n- call_tool能正确调用所有工具\n- 错误处理完善"
+    },
+    {
+      "id": "cf739c5d-49e5-439d-9634-47fc7d85f430",
+      "name": "创建测试用例",
+      "description": "为BackgroundProcessManager和相关工具创建单元测试用例，确保功能正确性和稳定性。",
+      "status": "待處理",
+      "dependencies": [
+        {
+          "taskId": "b62d8a8a-25f0-4c80-a104-55b2afe27582"
+        }
+      ],
+      "createdAt": "2025-05-10T01:25:01.640Z",
+      "updatedAt": "2025-05-10T01:25:01.640Z",
+      "relatedFiles": [
+        {
+          "path": "tests/test_process_manager.py",
+          "type": "REFERENCE",
+          "description": "参考测试文件，包含现有的进程管理测试"
+        }
+      ],
+      "implementationGuide": "创建测试文件tests/test_backgroud_process_manager.py，包含以下测试用例：\n1. 测试启动后台进程\n2. 测试列出进程\n3. 测试停止进程\n4. 测试获取进程输出\n5. 测试进程清理\n6. 测试错误处理\n\n参考test_process_manager.py的实现方式，使用mock技术模拟进程行为。",
+      "verificationCriteria": "- 所有测试用例实现完整\n- 测试覆盖率高\n- 边缘情况和错误处理得到测试\n- 测试执行通过"
+    },
+    {
+      "id": "7f984e99-3d0b-40f0-aeae-83e2dd01ee15",
+      "name": "运行测试并修复问题",
+      "description": "运行所有测试用例，找出并修复潜在问题，确保所有功能按预期工作。",
+      "status": "待處理",
+      "dependencies": [
+        {
+          "taskId": "cf739c5d-49e5-439d-9634-47fc7d85f430"
+        }
+      ],
+      "createdAt": "2025-05-10T01:25:01.640Z",
+      "updatedAt": "2025-05-10T01:25:01.640Z",
+      "implementationGuide": "使用pytest运行测试，着重检查：\n1. BackgroundProcessManager的功能测试\n2. 命令行工具集成测试\n3. 资源清理测试\n\n针对发现的问题进行修复，并重新运行测试直到全部通过。",
+      "verificationCriteria": "- 所有测试用例通过\n- 没有资源泄漏\n- 所有边缘情况处理正确\n- 代码风格一致"
+    }
+  ]
+}
