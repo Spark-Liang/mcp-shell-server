@@ -13,6 +13,7 @@ from mcp.types import TextContent, Tool, ImageContent, EmbeddedResource
 
 from .shell_executor import ShellExecutor
 from .version import __version__
+from .tool_handler import ToolHandler
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -85,22 +86,6 @@ class ToolHandler(Generic[T_ARGUMENTS], ABC):
             文本内容的序列
         """
         try:
-            # 前置检查特殊情况，兼容测试用例
-            if 'command' not in arguments:
-                raise ValueError("No command provided")
-            
-            if 'command' in arguments and not isinstance(arguments['command'], list):
-                raise ValueError("'command' must be an array")
-                
-            if 'command' in arguments and isinstance(arguments['command'], list) and not arguments['command']:
-                raise ValueError("No command provided")
-                
-            if 'directory' in arguments and not arguments['directory']:
-                raise ValueError("Directory is required")
-                
-            if 'timeout' in arguments and arguments['timeout'] == 0:
-                raise ValueError(f"Command execution timed out after {arguments['timeout']} seconds")
-                
             # 验证并转换参数
             validated_args = self.argument_model.model_validate(arguments)
             # 调用具体实现
@@ -176,6 +161,35 @@ class ExecuteToolHandler(ToolHandler[ShellExecuteArgs]):
     def get_allowed_commands(self) -> list[str]:
         """Get the allowed commands"""
         return self.executor.validator.get_allowed_commands()
+        
+    async def run_tool(self, arguments: dict) -> Sequence[TextContent]:
+        """
+        处理工具调用，添加shell命令特有的前置检查
+        
+        Args:
+            arguments: 工具参数字典
+            
+        Returns:
+            文本内容的序列
+        """
+        # 前置检查特殊情况，兼容测试用例
+        if 'command' not in arguments:
+            raise ValueError("No command provided")
+        
+        if 'command' in arguments and not isinstance(arguments['command'], list):
+            raise ValueError("'command' must be an array")
+            
+        if 'command' in arguments and isinstance(arguments['command'], list) and not arguments['command']:
+            raise ValueError("No command provided")
+            
+        if 'directory' in arguments and not arguments['directory']:
+            raise ValueError("Directory is required")
+            
+        if 'timeout' in arguments and arguments['timeout'] == 0:
+            raise ValueError(f"Command execution timed out after {arguments['timeout']} seconds")
+            
+        # 调用基类方法进行参数验证和工具执行
+        return await super().run_tool(arguments)
 
     async def _do_run_tool(self, arguments: ShellExecuteArgs) -> Sequence[TextContent]:
         """Execute the shell command with the given arguments"""
@@ -234,25 +248,29 @@ stderr:
 
 # Initialize tool handlers
 tool_handler = ExecuteToolHandler()
-
+# 先初始化基本工具处理器列表
+all_tool_handlers = [tool_handler]
 
 @app.list_tools()
 async def list_tools() -> list[Tool]:
     """List available tools."""
-    return [tool_handler.get_tool_def()]
+    # 返回所有工具定义
+    return [handler.get_tool_def() for handler in all_tool_handlers]
 
 
 @app.call_tool()
 async def call_tool(name: str, arguments: Any) -> Sequence[TextContent]:
     """Handle tool calls"""
     try:
-        if name != tool_handler.name:
+        # 查找匹配的工具处理器
+        handler = next((h for h in all_tool_handlers if h.name == name), None)
+        if not handler:
             raise ValueError(f"Unknown tool: {name}")
 
         if not isinstance(arguments, dict):
             raise ValueError("Arguments must be a dictionary")
 
-        return await tool_handler.run_tool(arguments)
+        return await handler.run_tool(arguments)
 
     except Exception as e:
         logger.error(traceback.format_exc())
@@ -262,7 +280,16 @@ async def call_tool(name: str, arguments: Any) -> Sequence[TextContent]:
 async def main() -> None:
     """Main entry point for the MCP shell server"""
     logger.info(f"Starting MCP shell server v{__version__}")
+    
     try:
+        # 导入后台进程工具处理器
+        from .bg_tool_handlers import bg_tool_handlers, background_process_manager
+        
+        # 添加后台进程工具处理器到全局处理器列表
+        global all_tool_handlers
+        all_tool_handlers = all_tool_handlers + bg_tool_handlers
+        logger.info(f"Initialized tool handlers: {[h.name for h in all_tool_handlers]}")
+        
         from mcp.server.stdio import stdio_server
 
         async with stdio_server() as (read_stream, write_stream):
@@ -272,3 +299,12 @@ async def main() -> None:
     except Exception as e:
         logger.error(f"Server error: {str(e)}")
         raise
+    finally:
+        # 确保在服务器关闭时清理所有后台进程
+        try:
+            from .bg_tool_handlers import background_process_manager
+            logger.info("Cleaning up background processes...")
+            await background_process_manager.cleanup_all()
+            logger.info("Background process cleanup completed.")
+        except Exception as cleanup_error:
+            logger.error(f"Error during background process cleanup: {cleanup_error}")
