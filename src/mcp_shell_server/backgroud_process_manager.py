@@ -13,6 +13,7 @@ from typing import Dict, List, Optional, Set, Any, Union, IO, Tuple, AsyncGenera
 from pydantic import BaseModel, Field, field_validator
 
 from mcp_shell_server.output_manager import OutputManager
+from mcp_shell_server.env_name_const import PROCESS_RETENTION_SECONDS
 
 logger = logging.getLogger("mcp-shell-server")
 
@@ -84,6 +85,10 @@ class BackgroundProcess:
         self.monitor_task = None  # 监控任务
         self.stdout_task = None  # 标准输出读取任务
         self.stderr_task = None  # 标准错误读取任务
+        
+        # 延迟清理相关属性
+        self.cleanup_scheduled = False  # 是否已安排清理
+        self.cleanup_handle = None  # 清理任务句柄
 
     def get_info(self) -> Dict[str, Any]:
         """获取进程基本信息
@@ -191,12 +196,8 @@ class BackgroundProcessManager:
         self._original_sigterm_handler = None
         self._setup_signal_handlers()
         
-        # 自动清理配置
-        self._auto_cleanup_task = None
-        self._auto_cleanup_interval = int(os.environ.get('MCP_SHELL_CLEANUP_INTERVAL', 1800))  # 默认30分钟
-        self._auto_cleanup_age = int(os.environ.get('PROCESS_RETENTION_SECONDS', 3600))  # 默认1小时
-        
-        # 注意：不在初始化时启动自动清理，而是在第一次添加进程时启动
+        # 进程保留时间设置（秒）
+        self._auto_cleanup_age = int(os.environ.get(PROCESS_RETENTION_SECONDS, 3600))  # 默认1小时
 
     def _setup_signal_handlers(self) -> None:
         """设置信号处理器，用于优雅地管理进程。"""
@@ -387,6 +388,9 @@ class BackgroundProcessManager:
                         bg_process.status = ProcessStatus.COMPLETED if exit_code == 0 else ProcessStatus.FAILED
                     
                     bg_process.end_time = datetime.now()
+                    
+                    # 进程已终止，安排延迟清理
+                    self.schedule_delayed_cleanup(bg_process.process_id)
                 finally:
                     # 等待输出流读取任务完成
                     tasks = []
@@ -421,10 +425,16 @@ class BackgroundProcessManager:
             bg_process.status = ProcessStatus.TERMINATED
             bg_process.end_time = datetime.now()
             
+            # 进程被取消，安排延迟清理
+            self.schedule_delayed_cleanup(bg_process.process_id)
+            
         except Exception as e:
             logger.error(f"监控进程时出错: {e}")
             bg_process.status = ProcessStatus.ERROR
             bg_process.end_time = datetime.now()
+            
+            # 进程出错，安排延迟清理
+            self.schedule_delayed_cleanup(bg_process.process_id)
             
             # 确保进程已终止
             if bg_process.process and bg_process.process.returncode is None:
@@ -553,9 +563,6 @@ class BackgroundProcessManager:
             timeout=timeout,
         )
         
-        # 启动自动清理任务
-        self.start_auto_cleanup()
-        
         return bg_process.process_id
         
     async def list_processes(self, labels: Optional[List[str]] = None, status: Optional[ProcessStatus] = None) -> List[Dict[str, Any]]:
@@ -615,12 +622,16 @@ class BackgroundProcessManager:
         
         # 如果进程已经不在运行状态，无需操作
         if not bg_process.is_running():
+            # 确保为非运行状态的进程安排延迟清理
+            self.schedule_delayed_cleanup(process_id)
             return True
             
         # 如果进程对象不存在，更新状态并返回
         if not bg_process.process:
             bg_process.status = ProcessStatus.TERMINATED
             bg_process.end_time = datetime.now()
+            # 安排延迟清理
+            self.schedule_delayed_cleanup(process_id)
             return True
             
         # 停止进程
@@ -648,9 +659,15 @@ class BackgroundProcessManager:
                         bg_process.process.kill()
                     await asyncio.wait_for(bg_process.process.wait(), timeout=2.0)
                     
-            # 清理进程资源
-            await self.cleanup_process(process_id)
-            
+            # 更新进程状态
+            bg_process.status = ProcessStatus.TERMINATED
+            bg_process.end_time = datetime.now()
+            if bg_process.process:
+                bg_process.exit_code = bg_process.process.returncode
+                
+            # 安排延迟清理
+            self.schedule_delayed_cleanup(process_id)
+                    
             return True
         except Exception as e:
             logger.error(f"停止进程时出错: {e}")
@@ -1009,8 +1026,11 @@ class BackgroundProcessManager:
 
     async def cleanup_all(self) -> None:
         """清理所有被跟踪的进程。"""
-        # 停止自动清理任务
-        await self.stop_auto_cleanup()
+        # 取消所有已安排的延迟清理任务
+        for proc_id, bg_proc in self._processes.items():
+            if bg_proc.cleanup_handle and not bg_proc.cleanup_handle.cancelled():
+                bg_proc.cleanup_handle.cancel()
+                bg_proc.cleanup_scheduled = False
         
         # 停止所有运行中的进程
         running_processes = [
@@ -1097,76 +1117,71 @@ class BackgroundProcessManager:
             
         return summary
 
-    def start_auto_cleanup(self) -> None:
-        """启动自动清理任务，仅在有事件循环时启动"""
-        if self._auto_cleanup_interval <= 0:
-            return
-            
-        # 检查是否有运行中的事件循环
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            # 没有运行中的事件循环，不启动任务
-            logger.debug("没有检测到运行中的事件循环，自动清理任务暂不启动")
-            return
-            
-        if self._auto_cleanup_task is None or self._auto_cleanup_task.done():
-            self._auto_cleanup_task = asyncio.create_task(self._auto_cleanup_loop())
-            logger.info(f"启动后台进程自动清理任务，间隔: {self._auto_cleanup_interval}秒，进程保留时间: {self._auto_cleanup_age}秒")
-            
-    async def stop_auto_cleanup(self) -> None:
-        """停止自动清理任务"""
-        if self._auto_cleanup_task and not self._auto_cleanup_task.done():
-            self._auto_cleanup_task.cancel()
-            try:
-                await self._auto_cleanup_task
-            except asyncio.CancelledError:
-                pass
-            except Exception as e:
-                logger.warning(f"停止自动清理任务时出错: {e}")
-            self._auto_cleanup_task = None
-            logger.info("已停止后台进程自动清理任务")
-            
-    async def _auto_cleanup_loop(self) -> None:
-        """自动清理循环，定期清理已完成的旧进程"""
-        try:
-            while True:
-                await asyncio.sleep(self._auto_cleanup_interval)
-                await self.cleanup_old_processes()
-        except asyncio.CancelledError:
-            # 任务被取消，正常退出
-            pass
-        except Exception as e:
-            logger.error(f"后台进程自动清理任务出错: {e}")
-            
-    async def cleanup_old_processes(self) -> int:
-        """清理已完成且超过指定时间的进程
+
+    def schedule_delayed_cleanup(self, process_id: str) -> None:
+        """为进程安排延迟清理任务
         
-        Returns:
-            int: 被清理的进程数量
+        Args:
+            process_id: 要安排清理的进程ID
         """
-        if self._auto_cleanup_age <= 0:
-            return 0
+        if process_id not in self._processes:
+            logger.warning(f"尝试为不存在的进程 {process_id} 安排清理任务")
+            return
             
-        # 计算清理时间阈值
-        cleanup_threshold = datetime.now() - timedelta(seconds=self._auto_cleanup_age)
+        bg_process = self._processes[process_id]
         
-        to_remove = []
-        for proc_id, bg_process in self._processes.items():
-            # 只清理非运行状态的进程
-            if bg_process.is_running():
-                continue
-                
-            # 检查进程结束时间是否超过阈值
-            if bg_process.end_time and bg_process.end_time < cleanup_threshold:
-                to_remove.append(proc_id)
-                
-        # 移除超时的进程
-        if to_remove:
-            logger.info(f"自动清理 {len(to_remove)} 个已完成的过期进程")
+        # 如果进程还在运行或已经安排了清理，则跳过
+        if bg_process.is_running() or bg_process.cleanup_scheduled:
+            return
             
-        for proc_id in to_remove:
-            await self.cleanup_process(proc_id)
-            del self._processes[proc_id]
+        # 取消已存在的清理任务
+        if bg_process.cleanup_handle and not bg_process.cleanup_handle.cancelled():
+            bg_process.cleanup_handle.cancel()
             
-        return len(to_remove)
+        # 获取延迟清理时间（秒）
+        retention_seconds = self._auto_cleanup_age
+        if retention_seconds <= 0:
+            return  # 如果保留时间设为0或负数，不自动清理
+            
+        try:
+            # 使用loop.call_later安排延迟清理
+            loop = asyncio.get_running_loop()
+            
+            # 创建一个延迟清理的协程封装函数
+            async def delayed_cleanup():
+                try:
+                    # 记录日志
+                    logger.info(f"执行延迟清理进程 {process_id}")
+                    
+                    # 检查进程是否仍然存在
+                    if process_id in self._processes:
+                        # 清理进程资源
+                        await self.cleanup_process(process_id)
+                        del self._processes[process_id]
+                except Exception as e:
+                    logger.error(f"延迟清理进程 {process_id} 时出错: {e}")
+                finally:
+                    # 完成清理任务后重置标记
+                    if process_id in self._processes:
+                        self._processes[process_id].cleanup_scheduled = False
+                        self._processes[process_id].cleanup_handle = None
+            
+            # 创建任务包装器，在延迟后执行清理
+            def schedule_task():
+                # 创建并返回任务
+                task = asyncio.create_task(delayed_cleanup())
+                return task
+                
+            # 使用call_later安排延迟执行
+            bg_process.cleanup_handle = loop.call_later(
+                retention_seconds, 
+                schedule_task
+            )
+            bg_process.cleanup_scheduled = True
+            
+            logger.debug(f"已为进程 {process_id} 安排延迟清理，将在 {retention_seconds} 秒后执行")
+        except RuntimeError:
+            # 没有运行中的事件循环，跳过延迟清理
+            logger.debug(f"没有检测到运行中的事件循环，跳过为进程 {process_id} 安排延迟清理")
+        except Exception as e:
+            logger.error(f"安排进程 {process_id} 延迟清理时出错: {e}")

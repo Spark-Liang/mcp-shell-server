@@ -606,15 +606,13 @@ async def test_get_process_status_summary(bg_process_manager):
 
 @pytest.mark.asyncio
 async def test_auto_cleanup_processes():
-    """测试自动清理过期进程的功能"""
-    # 临时修改环境变量，设置较短的清理间隔和保留时间
-    original_interval = os.environ.get('MCP_SHELL_CLEANUP_INTERVAL')
+    """测试自动延迟清理进程的功能"""
+    # 临时修改环境变量，设置较短的保留时间
     original_retention = os.environ.get('PROCESS_RETENTION_SECONDS')
     
     try:
-        # 设置为1秒清理间隔，2秒过期时间
-        os.environ['MCP_SHELL_CLEANUP_INTERVAL'] = '1'
-        os.environ['PROCESS_RETENTION_SECONDS'] = '2'
+        # 设置为1秒的保留时间
+        os.environ['PROCESS_RETENTION_SECONDS'] = '1'
         
         # 创建临时工作目录
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -638,7 +636,7 @@ async def test_auto_cleanup_processes():
                 description="Test process 2"
             )
             process2.status = ProcessStatus.COMPLETED
-            process2.end_time = datetime.now() - timedelta(seconds=1)  # 1秒前结束
+            process2.end_time = datetime.now()  # 刚刚结束
             
             # 模拟一个仍在运行的进程
             process3 = BackgroundProcess(
@@ -653,36 +651,34 @@ async def test_auto_cleanup_processes():
             manager._processes["test2"] = process2
             manager._processes["test3"] = process3
             
-            # 手动触发一次清理
-            removed = await manager.cleanup_old_processes()
+            # 为已完成的进程安排延迟清理
+            manager.schedule_delayed_cleanup("test1")
+            manager.schedule_delayed_cleanup("test2")
             
-            # 只有process1应该被清理(5秒前结束，超过了2秒保留时间)
-            assert removed == 1
+            # 验证清理任务已安排
+            assert process1.cleanup_scheduled
+            assert process2.cleanup_scheduled
+            assert process1.cleanup_handle is not None
+            assert process2.cleanup_handle is not None
+            assert not process3.cleanup_scheduled  # 运行中的进程不应该安排清理
+            
+            # 等待延迟清理执行（等待比保留时间稍长一点）
+            await asyncio.sleep(1.5)
+            
+            # 检查进程1是否已被清理
             assert "test1" not in manager._processes
-            assert "test2" in manager._processes
+            
+            # 确保进程3（运行中的进程）没有被清理
             assert "test3" in manager._processes
             
-            # 手动停止自动清理任务
-            await manager.stop_auto_cleanup()
+            # 手动清理所有进程
+            await manager.cleanup_all()
             
-            # 等待足够的时间让process2也过期
-            await asyncio.sleep(2)
-            
-            # 再次手动触发清理
-            removed = await manager.cleanup_old_processes()
-            
-            # 这次process2也应该被清理
-            assert removed == 1
-            assert "test2" not in manager._processes
-            assert "test3" in manager._processes  # 仍在运行的进程不会被清理
+            # 验证所有进程都已被清理
+            assert len(manager._processes) == 0
             
     finally:
         # 恢复原始环境变量
-        if original_interval is not None:
-            os.environ['MCP_SHELL_CLEANUP_INTERVAL'] = original_interval
-        else:
-            os.environ.pop('MCP_SHELL_CLEANUP_INTERVAL', None)
-            
         if original_retention is not None:
             os.environ['PROCESS_RETENTION_SECONDS'] = original_retention
         else:

@@ -291,6 +291,7 @@ name = "mcp-shell-server"
 source = { editable = "." }
 dependencies = [
     { name = "asyncio" },
+    { name = "click" },
     { name = "loguru" },
     { name = "mcp" },
 ]
@@ -315,6 +316,7 @@ test = [
 requires-dist = [
     { name = "asyncio", specifier = ">=3.4.3" },
     { name = "black", marker = "extra == 'dev'", specifier = ">=23.3.0" },
+    { name = "click", specifier = ">=8.1.7" },
     { name = "isort", marker = "extra == 'dev'", specifier = ">=5.12.0" },
     { name = "loguru", specifier = ">=0.7.3" },
     { name = "mcp", specifier = ">=1.1.2" },
