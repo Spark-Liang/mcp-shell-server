@@ -1,4 +1,5 @@
 [English](README.md) | [中文](README-CN.md)
+
 # MCP Shell Server
 
 [![codecov](https://codecov.io/gh/tumf/mcp-shell-server/branch/main/graph/badge.svg)](https://codecov.io/gh/tumf/mcp-shell-server)
@@ -14,6 +15,9 @@
 * **全面的输出信息**：返回stdout、stderr、退出状态和执行时间
 * **Shell操作符安全**：验证shell操作符（; , &&, ||, |）后的命令是否在白名单中
 * **超时控制**：设置命令的最大执行时间
+* **后台进程管理**：在后台运行长时间运行的命令并管理它们
+* **Web管理界面**：通过Web UI监控和管理后台进程
+* **多种服务器模式**：支持stdio（默认）、SSE和streamable HTTP模式
 
 ## 在Claude.app中的MCP客户端设置
 
@@ -76,10 +80,64 @@ pip install mcp-shell-server
 
 ### 启动服务器
 
+#### stdio模式（默认）
+
 ```bash
+# 基本用法（stdio模式）
 ALLOW_COMMANDS="ls,cat,echo" uvx mcp-shell-server
 # 或者使用别名
 ALLOWED_COMMANDS="ls,cat,echo" uvx mcp-shell-server
+
+# 明确指定stdio模式
+ALLOW_COMMANDS="ls,cat,echo" uvx mcp-shell-server stdio
+```
+
+#### SSE模式
+
+以服务器发送事件（SSE）模式启动服务器：
+
+```bash
+# 使用默认设置（主机：127.0.0.1，端口：8000）
+ALLOW_COMMANDS="ls,cat,echo" uvx mcp-shell-server sse
+
+# 使用自定义主机和端口
+ALLOW_COMMANDS="ls,cat,echo" uvx mcp-shell-server sse --host 0.0.0.0 --port 9000
+
+# 使用自定义Web路径
+ALLOW_COMMANDS="ls,cat,echo" uvx mcp-shell-server sse --web-path /shell-web
+```
+
+#### Streamable HTTP模式
+
+以可流式HTTP模式启动服务器：
+
+```bash
+# 使用默认设置（主机：127.0.0.1，端口：8000，路径：/mcp）
+ALLOW_COMMANDS="ls,cat,echo" uvx mcp-shell-server http
+
+# 使用自定义主机、端口和路径
+ALLOW_COMMANDS="ls,cat,echo" uvx mcp-shell-server http --host 0.0.0.0 --port 9000 --path /shell-api
+
+# 使用自定义Web路径
+ALLOW_COMMANDS="ls,cat,echo" uvx mcp-shell-server http --web-path /shell-web
+```
+
+### 启动Web界面
+
+服务器包含一个用于监控和管理后台进程的Web管理界面：
+
+```bash
+# 使用默认设置启动（端口5000）
+ALLOW_COMMANDS="ls,cat,echo" uvx mcp-shell-server --web
+
+# 指定自定义端口
+ALLOW_COMMANDS="ls,cat,echo" uvx mcp-shell-server --web --port 8080
+
+# 在特定主机上运行
+ALLOW_COMMANDS="ls,cat,echo" uvx mcp-shell-server --web --host 127.0.0.1
+
+# 使用URL前缀（适用于反向代理设置）
+ALLOW_COMMANDS="ls,cat,echo" uvx mcp-shell-server --web --url-prefix /shell
 ```
 
 ### 构建独立可执行文件
@@ -95,6 +153,9 @@ uv run --extra dev python build_executable.py --proxy http://your-proxy:port
 
 # 快速构建模式（减少优化，加快构建时间）
 uv run --extra dev python build_executable.py --quick
+
+# 并行编译加速构建
+uv run --extra dev python build_executable.py --jobs 8
 
 # 测试模式（显示将要执行的操作但不实际执行）
 uv run --extra dev python build_executable.py --test
@@ -159,6 +220,53 @@ set ALLOW_COMMANDS=dir,type,echo,findstr
 set COMSPEC=C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe
 uvx mcp-shell-server
 ```
+
+## 服务器模式
+
+服务器支持三种不同的运行模式：
+
+### stdio模式（默认）
+
+使用标准输入/输出进行通信，非常适合与Claude.app和其他MCP客户端集成。
+
+### SSE模式
+
+服务器发送事件（Server-Sent Events）模式允许服务器通过HTTP向客户端推送更新。这对于基于Web的集成和实时更新非常有用。
+
+命令行选项：
+- `--host`：服务器主机地址（默认：127.0.0.1）
+- `--port`：服务器端口（默认：8000）
+- `--web-path`：Web界面路径（默认：/web）
+
+### Streamable HTTP模式
+
+提供HTTP API端点进行通信。此模式适用于RESTful API集成。
+
+命令行选项：
+- `--host`：服务器主机地址（默认：127.0.0.1）
+- `--port`：服务器端口（默认：8000）
+- `--path`：API端点路径（默认：/mcp）
+- `--web-path`：Web界面路径（默认：/web）
+
+## Web管理界面
+
+Web界面提供了一种方便的方式来监控和管理后台进程：
+
+### 功能特点
+
+* **进程列表视图**：查看所有正在运行和已完成的进程
+* **进程详情视图**：检查特定进程的详细信息
+* **实时输出查看**：监控正在运行进程的stdout和stderr
+* **进程控制**：停止、终止和清理进程
+* **过滤功能**：按状态或标签过滤进程
+
+### 截图
+
+（可用时插入截图）
+
+### 访问Web界面
+
+默认情况下，使用`--web`标志启动时，Web界面可在http://localhost:5000访问。
 
 ## API参考
 
@@ -349,7 +457,8 @@ uvx mcp-shell-server
     "with_stdout": true,
     "with_stderr": true,
     "add_time_prefix": true,
-    "time_prefix_format": "%Y-%m-%d %H:%M:%S.%f"
+    "time_prefix_format": "%Y-%m-%d %H:%M:%S.%f",
+    "follow_seconds": 5
 }
 ```
 
@@ -384,6 +493,7 @@ uvx mcp-shell-server
 | with_stderr       | boolean   | 否   | 显示错误输出（默认：false）                   |
 | add_time_prefix   | boolean   | 否   | 为每行输出添加时间戳前缀（默认：true）          |
 | time_prefix_format| string    | 否   | 时间戳前缀的格式（默认："%Y-%m-%d %H:%M:%S.%f"） |
+| follow_seconds    | integer   | 否   | 等待指定秒数以获取新日志                       |
 
 #### 响应字段
 
@@ -391,6 +501,74 @@ uvx mcp-shell-server
 |-------|---------|----------------------------------|
 | type  | string  | 始终为"text"                      |
 | text  | string  | 进程信息和带有可选时间戳的输出       |
+
+### 工具：shell_bg_clean
+
+清理已完成或失败的后台进程。
+
+#### 请求格式
+
+```json
+{
+    "process_ids": ["process_123", "process_456"]
+}
+```
+
+#### 响应格式
+
+```json
+{
+    "type": "text",
+    "text": "进程ID | 状态 | 消息\n---------\nprocess_123 | SUCCESS | 进程清理成功\nprocess_456 | FAILED | 进程仍在运行中"
+}
+```
+
+#### 请求参数
+
+| 字段        | 类型       | 必需  | 描述                         |
+|------------|------------|------|----------------------------|
+| process_ids| string[]   | 是   | 要清理的进程ID列表            |
+
+#### 响应字段
+
+| 字段   | 类型    | 描述                    |
+|-------|---------|------------------------|
+| type  | string  | 始终为"text"            |
+| text  | string  | 格式化的清理结果表格      |
+
+### 工具：shell_bg_detail
+
+获取特定后台进程的详细信息。
+
+#### 请求格式
+
+```json
+{
+    "process_id": "process_123"
+}
+```
+
+#### 响应格式
+
+```json
+{
+    "type": "text",
+    "text": "### 进程详情: process_123\n\n#### 基本信息\n- **状态**: completed\n- **命令**: `npm start`\n- **描述**: 启动Node.js应用\n- **标签**: nodejs, app\n\n#### 时间信息\n- **开始时间**: 2023-05-06 14:30:00\n- **结束时间**: 2023-05-06 14:35:27\n- **持续时间**: 0:05:27\n\n#### 执行信息\n- **工作目录**: /path/to/project\n- **退出码**: 0\n\n#### 输出信息\n- 使用`shell_bg_logs`工具查看进程输出\n- 示例: `shell_bg_logs(process_id='process_123')`"
+}
+```
+
+#### 请求参数
+
+| 字段       | 类型     | 必需  | 描述                   |
+|-----------|----------|------|------------------------|
+| process_id| string   | 是   | 获取详情的进程ID        |
+
+#### 响应字段
+
+| 字段   | 类型    | 描述                      |
+|-------|---------|--------------------------|
+| type  | string  | 始终为"text"              |
+| text  | string  | 关于进程的格式化详细信息    |
 
 ## 安全性
 

@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>进程详情 - 后台进程管理</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background-color: #fff;
+            padding: 20px;
+            border-radius: 5px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+        }
+        h1, h2 {
+            color: #333;
+        }
+        .back-link {
+            margin-bottom: 20px;
+            display: block;
+        }
+        .info-card {
+            margin-bottom: 20px;
+            padding: 20px;
+            background-color: #f9f9f9;
+            border-radius: 5px;
+            border-left: 4px solid #4CAF50;
+        }
+        .info-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        .info-table th {
+            width: 150px;
+            text-align: right;
+            padding: 8px 16px;
+            color: #666;
+        }
+        .info-table td {
+            padding: 8px 16px;
+        }
+        .status-running {
+            color: green;
+            font-weight: bold;
+        }
+        .status-completed {
+            color: blue;
+        }
+        .status-failed, .status-error {
+            color: red;
+        }
+        .status-terminated {
+            color: orange;
+        }
+        .output-container {
+            margin-top: 30px;
+        }
+        .output-tabs {
+            display: flex;
+            margin-bottom: 10px;
+        }
+        .tab {
+            padding: 10px 20px;
+            background-color: #f2f2f2;
+            border: 1px solid #ddd;
+            border-radius: 5px 5px 0 0;
+            margin-right: 5px;
+            cursor: pointer;
+        }
+        .tab.active {
+            background-color: #fff;
+            border-bottom: 1px solid #fff;
+        }
+        .output-content {
+            border: 1px solid #ddd;
+            padding: 20px;
+            min-height: 300px;
+            border-radius: 0 5px 5px 5px;
+            background-color: #3030f6;
+            color: #f0f0f0;
+            font-family: monospace;
+            overflow: auto;
+            white-space: pre-wrap;
+        }
+        .action-buttons {
+            margin-top: 20px;
+            display: flex;
+            gap: 10px;
+        }
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: bold;
+        }
+        .btn-stop {
+            background-color: #f44336;
+            color: white;
+        }
+        .btn-clean {
+            background-color: #2196F3;
+            color: white;
+        }
+        .btn-refresh {
+            background-color: #4CAF50;
+            color: white;
+        }
+        .output-filter {
+            margin-bottom: 15px;
+            padding: 10px;
+            background-color: #f8f8f8;
+            border-radius: 5px;
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 10px;
+        }
+        .output-filter label {
+            margin-right: 5px;
+        }
+        .output-filter input, .output-filter select {
+            padding: 5px;
+            border: 1px solid #ddd;
+            border-radius: 3px;
+        }
+        .output-filter button {
+            padding: 5px 10px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <a href="/" class="back-link">&larr; 返回进程列表</a>
+        <h1>进程详情</h1>
+        
+        <div class="info-card">
+            <h2 id="processTitle">加载中...</h2>
+            <table class="info-table">
+                <tr>
+                    <th>进程ID:</th>
+                    <td id="processId">{{ process_id }}</td>
+                </tr>
+                <tr>
+                    <th>命令:</th>
+                    <td id="processCommand">-</td>
+                </tr>
+                <tr>
+                    <th>工作目录:</th>
+                    <td id="processDirectory">-</td>
+                </tr>
+                <tr>
+                    <th>描述:</th>
+                    <td id="processDescription">-</td>
+                </tr>
+                <tr>
+                    <th>状态:</th>
+                    <td id="processStatus">-</td>
+                </tr>
+                <tr>
+                    <th>开始时间:</th>
+                    <td id="processStartTime">-</td>
+                </tr>
+                <tr>
+                    <th>结束时间:</th>
+                    <td id="processEndTime">-</td>
+                </tr>
+                <tr>
+                    <th>退出代码:</th>
+                    <td id="processExitCode">-</td>
+                </tr>
+                <tr>
+                    <th>标签:</th>
+                    <td id="processLabels">-</td>
+                </tr>
+            </table>
+            
+            <div class="action-buttons">
+                <div id="actionButtonsContainer">
+                    <!-- 按钮将根据进程状态动态生成 -->
+                </div>
+                <button class="btn btn-refresh" onclick="refreshProcess()">刷新</button>
+            </div>
+        </div>
+        
+        <div class="output-container">
+            <h2>进程输出</h2>
+            
+            <div class="output-filter">
+                <div>
+                    <label for="tailLines">显示最后行数:</label>
+                    <input type="number" id="tailLines" min="1" value="100">
+                </div>
+                <div>
+                    <label for="showStderr">显示错误输出:</label>
+                    <input type="checkbox" id="showStderr">
+                </div>
+                <button onclick="refreshOutput()">应用筛选</button>
+            </div>
+            
+            <div class="output-tabs">
+                <div class="tab active" onclick="switchTab('stdout')">标准输出</div>
+                <div class="tab" onclick="switchTab('stderr')">错误输出</div>
+            </div>
+            
+            <div id="stdoutContent" class="output-content">等待加载...</div>
+            <div id="stderrContent" class="output-content" style="display: none;">等待加载...</div>
+        </div>
+    </div>
+
+    <script>
+        // 当前进程ID
+        const processId = "{{ process_id }}";
+        // 当前活动标签
+        let activeTab = 'stdout';
+        // 进程详情
+        let processInfo = null;
+        
+        // 页面加载完成后加载进程信息
+        document.addEventListener('DOMContentLoaded', function() {
+            loadProcessInfo();
+            refreshOutput();
+            
+            // 每5秒刷新一次进程信息（只有在running状态下）
+            setInterval(function() {
+                if (processInfo && processInfo.status === 'running') {
+                    loadProcessInfo(false);
+                    refreshOutput(false);
+                }
+            }, 5000);
+        });
+        
+        // 加载进程信息
+        function loadProcessInfo(showLoading = true) {
+            if (showLoading) {
+                document.getElementById('processTitle').textContent = "加载中...";
+            }
+            
+            fetch(`/api/process/${processId}`)
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('进程不存在');
+                    }
+                    return response.json();
+                })
+                .then(process => {
+                    processInfo = process;
+                    displayProcessInfo(process);
+                    updateActionButtons(process);
+                })
+                .catch(error => {
+                    console.error('获取进程信息失败:', error);
+                    document.getElementById('processTitle').textContent = "错误: " + error.message;
+                });
+        }
+        
+        // 显示进程信息
+        function displayProcessInfo(process) {
+            document.getElementById('processTitle').textContent = process.description;
+            document.getElementById('processCommand').textContent = process.command.join(' ');
+            document.getElementById('processDirectory').textContent = process.directory;
+            document.getElementById('processDescription').textContent = process.description;
+            
+            // 添加状态样式
+            const statusElement = document.getElementById('processStatus');
+            statusElement.textContent = process.status;
+            statusElement.className = `status-${process.status}`;
+            
+            // 格式化时间
+            document.getElementById('processStartTime').textContent = formatDateTime(process.start_time);
+            document.getElementById('processEndTime').textContent = process.end_time ? formatDateTime(process.end_time) : '-';
+            
+            // 显示退出代码
+            document.getElementById('processExitCode').textContent = process.exit_code !== null ? process.exit_code : '-';
+            
+            // 显示标签
+            document.getElementById('processLabels').textContent = process.labels && process.labels.length > 0 ? 
+                process.labels.join(', ') : '无';
+        }
+        
+        // 更新操作按钮
+        function updateActionButtons(process) {
+            const container = document.getElementById('actionButtonsContainer');
+            container.innerHTML = '';
+            
+            if (process.status === 'running') {
+                // 运行中的进程显示停止按钮
+                const stopButton = document.createElement('button');
+                stopButton.className = 'btn btn-stop';
+                stopButton.textContent = '停止进程';
+                stopButton.onclick = function() { stopProcess(); };
+                container.appendChild(stopButton);
+            } else {
+                // 已结束的进程显示清理按钮
+                const cleanButton = document.createElement('button');
+                cleanButton.className = 'btn btn-clean';
+                cleanButton.textContent = '清理进程';
+                cleanButton.onclick = function() { cleanProcess(); };
+                container.appendChild(cleanButton);
+            }
+        }
+        
+        // 刷新进程信息
+        function refreshProcess() {
+            loadProcessInfo();
+            refreshOutput();
+        }
+        
+        // 切换输出标签
+        function switchTab(tab) {
+            activeTab = tab;
+            
+            // 更新标签样式
+            document.querySelectorAll('.tab').forEach(el => el.classList.remove('active'));
+            document.querySelector(`.tab:nth-child(${tab === 'stdout' ? 1 : 2})`).classList.add('active');
+            
+            // 显示对应内容
+            document.getElementById('stdoutContent').style.display = tab === 'stdout' ? 'block' : 'none';
+            document.getElementById('stderrContent').style.display = tab === 'stderr' ? 'block' : 'none';
+        }
+        
+        // 刷新输出
+        function refreshOutput(showLoading = true) {
+            // 获取筛选参数
+            const tailLines = document.getElementById('tailLines').value;
+            const showStderr = document.getElementById('showStderr').checked;
+            
+            // 构建URL
+            let url = `/api/process/${processId}/output?`;
+            if (tailLines) {
+                url += `tail=${tailLines}&`;
+            }
+            if (showStderr) {
+                url += `stderr=true&`;
+            }
+            
+            // 显示加载中
+            if (showLoading) {
+                document.getElementById('stdoutContent').textContent = '加载中...';
+                document.getElementById('stderrContent').textContent = '加载中...';
+            }
+            
+            // 获取输出
+            fetch(url)
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('获取输出失败');
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    // 显示标准输出
+                    displayOutput('stdoutContent', data.stdout);
+                    
+                    // 显示错误输出
+                    displayOutput('stderrContent', data.stderr);
+                })
+                .catch(error => {
+                    console.error('获取进程输出失败:', error);
+                    document.getElementById('stdoutContent').textContent = '错误: ' + error.message;
+                    document.getElementById('stderrContent').textContent = '错误: ' + error.message;
+                });
+        }
+        
+        // 显示输出内容
+        function displayOutput(elementId, outputLines) {
+            const container = document.getElementById(elementId);
+            
+            if (!outputLines || outputLines.length === 0) {
+                container.textContent = '无输出';
+                return;
+            }
+            
+            let content = '';
+            outputLines.forEach(line => {
+                const timestamp = formatDateTime(line.timestamp);
+                content += `[${timestamp}] ${line.text}\n`;
+            });
+            
+            container.textContent = content;
+            
+            // 滚动到底部
+            container.scrollTop = container.scrollHeight;
+        }
+        
+        // 停止进程
+        function stopProcess() {
+            if (confirm('确定要停止此进程吗？')) {
+                fetch(`/api/process/${processId}/stop`, {
+                    method: 'POST'
+                })
+                .then(response => response.json())
+                .then(result => {
+                    alert(result.message || '进程已停止');
+                    refreshProcess();
+                })
+                .catch(error => {
+                    console.error('停止进程失败:', error);
+                    alert('停止进程失败');
+                });
+            }
+        }
+        
+        // 清理进程
+        function cleanProcess() {
+            if (confirm('确定要清理此进程吗？此操作不可撤销。')) {
+                fetch(`/api/process/${processId}/clean`, {
+                    method: 'POST'
+                })
+                .then(response => response.json())
+                .then(result => {
+                    alert(result.message || '进程已清理');
+                    window.location.href = '/';  // 清理后返回列表页
+                })
+                .catch(error => {
+                    console.error('清理进程失败:', error);
+                    alert('清理进程失败');
+                });
+            }
+        }
+        
+        // 格式化日期时间
+        function formatDateTime(isoString) {
+            if (!isoString) return '-';
+            const date = new Date(isoString);
+            return `${date.getFullYear()}-${padZero(date.getMonth() + 1)}-${padZero(date.getDate())} ${padZero(date.getHours())}:${padZero(date.getMinutes())}:${padZero(date.getSeconds())}`;
+        }
+        
+        // 补零函数
+        function padZero(num) {
+            return num.toString().padStart(2, '0');
+        }
+    </script>
+</body>
+</html> 
