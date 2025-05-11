@@ -78,3 +78,6 @@ share/python-wheels/
 MANIFEST
 
 prompt.md
+
+# Nuitka
+nuitka-crash-report.xml

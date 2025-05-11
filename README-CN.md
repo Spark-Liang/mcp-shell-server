@@ -1,3 +1,4 @@
+[English](README.md) | [中文](README-CN.md)
 # MCP Shell Server
 
 [![codecov](https://codecov.io/gh/tumf/mcp-shell-server/branch/main/graph/badge.svg)](https://codecov.io/gh/tumf/mcp-shell-server)
@@ -77,11 +78,36 @@ pip install mcp-shell-server
 
 ```bash
 ALLOW_COMMANDS="ls,cat,echo" uvx mcp-shell-server
-# 或使用别名
+# 或者使用别名
 ALLOWED_COMMANDS="ls,cat,echo" uvx mcp-shell-server
 ```
 
-`ALLOW_COMMANDS`（或其别名`ALLOWED_COMMANDS`）环境变量指定允许执行的命令。命令可以用逗号分隔，逗号周围可以有可选的空格。
+### 构建独立可执行文件
+
+你可以构建一个不依赖Python运行时的独立可执行文件:
+
+```bash
+# 默认设置的简单构建
+uv run --extra dev python build_executable.py
+
+# 使用HTTP代理构建（如果需要下载C编译器时很有用）
+uv run --extra dev python build_executable.py --proxy http://your-proxy:port
+
+# 快速构建模式（减少优化，加快构建时间）
+uv run --extra dev python build_executable.py --quick
+
+# 测试模式（显示将要执行的操作但不实际执行）
+uv run --extra dev python build_executable.py --test
+
+# 验证已存在的可执行文件
+uv run --extra dev python build_executable.py --verify
+```
+
+生成的可执行文件将位于`dist/executable/mcp-shell-server.exe`（Windows系统）或`dist/executable/mcp-shell-server`（Linux/macOS系统）。
+
+### 环境变量
+
+`ALLOW_COMMANDS`（或其别名`ALLOWED_COMMANDS`）环境变量指定了允许执行的命令。命令可以用逗号分隔，逗号周围可以有可选的空格。
 
 ALLOW_COMMANDS或ALLOWED_COMMANDS的有效格式：
 

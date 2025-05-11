@@ -81,6 +81,31 @@ ALLOW_COMMANDS="ls,cat,echo" uvx mcp-shell-server
 ALLOWED_COMMANDS="ls,cat,echo" uvx mcp-shell-server
 ```
 
+### Building Standalone Executable
+
+You can build a standalone executable file that doesn't require Python runtime:
+
+```bash
+# Simple build with default settings
+uv run --extra dev python build_executable.py
+
+# Build with HTTP proxy (useful if you need to download C compiler)
+uv run --extra dev python build_executable.py --proxy http://your-proxy:port
+
+# Quick build with minimal optimizations (faster build time)
+uv run --extra dev python build_executable.py --quick
+
+# Testing mode (shows what will be done without executing)
+uv run --extra dev python build_executable.py --test
+
+# Verify an existing executable
+uv run --extra dev python build_executable.py --verify
+```
+
+The output executable will be located in `dist/executable/mcp-shell-server.exe` (on Windows) or `dist/executable/mcp-shell-server` (on Linux/macOS).
+
+### Environment Variables
+
 The `ALLOW_COMMANDS` (or its alias `ALLOWED_COMMANDS`) environment variable specifies which commands are allowed to be executed. Commands can be separated by commas with optional spaces around them.
 
 Valid formats for ALLOW_COMMANDS or ALLOWED_COMMANDS:
