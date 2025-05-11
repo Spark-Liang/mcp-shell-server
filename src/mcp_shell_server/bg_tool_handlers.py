@@ -78,7 +78,7 @@ class StartBackgroundProcessToolHandler(ToolHandler[StartProcessArgs]):
     @property
     def description(self) -> str:
         from .shell_executor import ShellExecutor
-        return f"Start a command in background and return its ID. Allowed commands: {', '.join(ShellExecutor().validator.get_allowed_commands())}"
+        return f"Start a command **in background** and return its ID. Allowed commands: {', '.join(ShellExecutor().validator.get_allowed_commands())}"
         
     @property
     def argument_model(self) -> Type[StartProcessArgs]:
@@ -197,6 +197,13 @@ class StopProcessArgs(BaseModel):
     )
 
 
+class CleanProcessArgs(BaseModel):
+    """清理进程的参数模型"""
+    process_ids: List[str] = Field(
+        description="要清理的进程ID列表",
+    )
+
+
 class StopBackgroundProcessToolHandler(ToolHandler[StopProcessArgs]):
     """停止后台进程的工具处理器"""
     
@@ -275,6 +282,11 @@ class GetProcessOutputArgs(BaseModel):
         default="%Y-%m-%d %H:%M:%S.%f",
         description="Format of the timestamp prefix, using strftime format",
     )
+    follow_seconds: Optional[int] = Field(
+        default=None,
+        description="Wait for the specified number of seconds to get new logs. If None, return immediately.",
+        ge=0,  # greater than or equal to 0
+    )
     
     # 模型验证，处理从JSON序列化时字符串到datetime的转换
     @model_validator(mode='before')
@@ -349,6 +361,7 @@ class GetBackgroundProcessOutputToolHandler(ToolHandler[GetProcessOutputArgs]):
         with_stderr = arguments.with_stderr
         add_time_prefix = arguments.add_time_prefix
         time_prefix_format = arguments.time_prefix_format
+        follow_seconds = arguments.follow_seconds
         
         content: List[TextContent] = []
         
@@ -385,6 +398,15 @@ class GetBackgroundProcessOutputToolHandler(ToolHandler[GetProcessOutputArgs]):
                     text="---\nNo output requested. Set with_stdout=true or with_stderr=true to view logs.\n---"
                 ))
                 return content
+            
+            # 如果设置了follow_seconds，添加提示信息
+            if follow_seconds is not None and follow_seconds > 0:
+                follow_info = f"\n正在等待进程输出... ({follow_seconds}秒)"
+                content.append(TextContent(type="text", text=follow_info))
+                
+                # 等待指定秒数
+                if process.status == ProcessStatus.RUNNING:
+                    await asyncio.sleep(follow_seconds)
             
             # 如果需要查看标准输出
             if with_stdout:
@@ -431,10 +453,157 @@ class GetBackgroundProcessOutputToolHandler(ToolHandler[GetProcessOutputArgs]):
             raise ValueError(f"Error getting process output: {str(e)}")
 
 
+class CleanBackgroundProcessToolHandler(ToolHandler[CleanProcessArgs]):
+    """清理后台进程的工具处理器"""
+    
+    @property
+    def name(self) -> str:
+        return "shell_bg_clean"
+        
+    @property
+    def description(self) -> str:
+        return "Clean background processes that have completed or failed"
+        
+    @property
+    def argument_model(self) -> Type[CleanProcessArgs]:
+        return CleanProcessArgs
+        
+    async def _do_run_tool(self, arguments: CleanProcessArgs) -> Sequence[TextContent]:
+        process_ids = arguments.process_ids
+        
+        # 结果表格
+        results = []
+        
+        for proc_id in process_ids:
+            try:
+                await background_process_manager.clean_completed_process(proc_id)
+                results.append({
+                    "process_id": proc_id,
+                    "status": "SUCCESS",
+                    "message": "Process cleaned successfully"
+                })
+            except ValueError as e:
+                results.append({
+                    "process_id": proc_id,
+                    "status": "FAILED",
+                    "message": str(e)
+                })
+            except Exception as e:
+                logger.error(f"Error cleaning process {proc_id}: {e}")
+                results.append({
+                    "process_id": proc_id,
+                    "status": "ERROR",
+                    "message": f"Unexpected error: {str(e)}"
+                })
+        
+        # 格式化输出
+        lines = ["PROCESS ID | STATUS | MESSAGE"]
+        lines.append("-" * 100)
+        
+        for result in results:
+            pid = result["process_id"]
+            status = result["status"]
+            message = result["message"]
+            lines.append(f"{pid} | {status} | {message}")
+            
+        return [TextContent(
+            type="text",
+            text="\n".join(lines)
+        )]
+
+
+class GetProcessDetailArgs(BaseModel):
+    """获取进程详情的参数模型"""
+    process_id: str = Field(
+        description="ID of the process to get details for",
+    )
+
+
+class GetBackgroundProcessDetailToolHandler(ToolHandler[GetProcessDetailArgs]):
+    """获取后台进程详情的工具处理器"""
+    
+    @property
+    def name(self) -> str:
+        return "shell_bg_detail"
+        
+    @property
+    def description(self) -> str:
+        return "Get detailed information about a specific background process"
+        
+    @property
+    def argument_model(self) -> Type[GetProcessDetailArgs]:
+        return GetProcessDetailArgs
+        
+    async def _do_run_tool(self, arguments: GetProcessDetailArgs) -> Sequence[TextContent]:
+        process_id = arguments.process_id
+        
+        try:
+            # 获取进程详情
+            process = await background_process_manager.get_process(process_id)
+            if not process:
+                raise ValueError(f"Process with ID {process_id} not found")
+                
+            # 获取进程信息
+            process_info = process.get_info()
+            
+            # 格式化输出
+            lines = [f"### Process Details: {process_id}"]
+            lines.append("")
+            
+            # 基本信息
+            lines.append("#### Basic Information")
+            lines.append(f"- **Status**: {process_info['status']}")
+            lines.append(f"- **Command**: `{' '.join(process_info['command'])}`")
+            lines.append(f"- **Description**: {process_info['description']}")
+            if process_info['labels']:
+                lines.append(f"- **Labels**: {', '.join(process_info['labels'])}")
+            
+            # 时间信息
+            lines.append("")
+            lines.append("#### Timing")
+            start_time = process_info['start_time'].replace('T', ' ').split('.')[0]
+            lines.append(f"- **Started**: {start_time}")
+            
+            if process_info['end_time']:
+                end_time = process_info['end_time'].replace('T', ' ').split('.')[0]
+                lines.append(f"- **Ended**: {end_time}")
+                
+                # 计算运行时间
+                start_dt = datetime.fromisoformat(process_info['start_time'])
+                end_dt = datetime.fromisoformat(process_info['end_time'])
+                duration = end_dt - start_dt
+                lines.append(f"- **Duration**: {duration}")
+            
+            # 执行信息
+            lines.append("")
+            lines.append("#### Execution")
+            lines.append(f"- **Working Directory**: {process_info['directory']}")
+            if process_info['exit_code'] is not None:
+                lines.append(f"- **Exit Code**: {process_info['exit_code']}")
+            
+            # 进程输出信息
+            lines.append("")
+            lines.append("#### Output Information")
+            lines.append(f"- Use `shell_bg_logs` tool to view process output")
+            lines.append(f"- Example: `shell_bg_logs(process_id='{process_id}')`")
+            
+            return [TextContent(
+                type="text",
+                text="\n".join(lines)
+            )]
+        except ValueError as e:
+            raise ValueError(str(e))
+        except Exception as e:
+            logger.error(f"Error getting process details: {e}")
+            raise ValueError(f"Error getting process details: {str(e)}")
+
+
 # 列表，包含所有工具处理器
 bg_tool_handlers = [
     StartBackgroundProcessToolHandler(),
     ListBackgroundProcessesToolHandler(),
     StopBackgroundProcessToolHandler(),
     GetBackgroundProcessOutputToolHandler(),
+    CleanBackgroundProcessToolHandler(),
+    GetBackgroundProcessDetailToolHandler(),
 ] 

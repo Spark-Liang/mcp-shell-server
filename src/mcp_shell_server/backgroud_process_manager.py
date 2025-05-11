@@ -475,6 +475,20 @@ class BackgroundProcessManager:
         process_id = str(uuid.uuid4())[:5]
         shell_cmd = " ".join(command)
         
+        # 记录进程启动详细信息
+        logger.info(f"启动进程 {process_id}:")
+        logger.info(f"  命令: {shell_cmd}")
+        logger.info(f"  工作目录: {directory}")
+        if envs:
+            logger.info(f"  环境变量: {envs}")
+        logger.info(f"  描述: {description}")
+        if labels:
+            logger.info(f"  标签: {labels}")
+        if encoding:
+            logger.info(f"  编码: {encoding}")
+        if timeout:
+            logger.info(f"  超时: {timeout}秒")
+        
         try:
             # 创建实际的子进程
             process = await asyncio.create_subprocess_shell(
@@ -1023,6 +1037,35 @@ class BackgroundProcessManager:
                 
             # 清理日志文件
             bg_process.cleanup()
+
+    async def clean_completed_process(self, process_id: str) -> bool:
+        """清理已完成的进程。只有当进程已经结束时才会清理，运行中的进程会报错。
+        
+        Args:
+            process_id: 要清理的进程ID
+            
+        Returns:
+            bool: 清理是否成功
+            
+        Raises:
+            ValueError: 如果进程不存在或进程仍在运行
+        """
+        if process_id not in self._processes:
+            raise ValueError(f"进程ID {process_id} 不存在")
+            
+        bg_process = self._processes[process_id]
+        
+        # 检查进程是否已结束
+        if bg_process.is_running():
+            raise ValueError(f"进程 {process_id} 仍在运行中，无法清理")
+            
+        # 清理进程资源
+        await self.cleanup_process(process_id)
+        
+        # 从进程字典中删除
+        del self._processes[process_id]
+        
+        return True
 
     async def cleanup_all(self) -> None:
         """清理所有被跟踪的进程。"""

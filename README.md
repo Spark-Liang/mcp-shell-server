@@ -1,3 +1,5 @@
+[English](README.md) | [中文](README-CN.md)
+
 # MCP Shell Server
 
 [![codecov](https://codecov.io/gh/tumf/mcp-shell-server/branch/main/graph/badge.svg)](https://codecov.io/gh/tumf/mcp-shell-server)
@@ -13,6 +15,9 @@ A secure shell command execution server implementing the Model Context Protocol 
 * **Comprehensive Output**: Returns stdout, stderr, exit status, and execution time
 * **Shell Operator Safety**: Validates commands after shell operators (; , &&, ||, |)
 * **Timeout Control**: Set maximum execution time for commands
+* **Background Process Management**: Run long-running commands in the background and manage them
+* **Web Management Interface**: Monitor and manage background processes through a web UI
+* **Multiple Server Modes**: Support for stdio (default), SSE, and streamable HTTP modes
 
 ## MCP client setting in your Claude.app
 
@@ -75,10 +80,64 @@ pip install mcp-shell-server
 
 ### Starting the Server
 
+#### stdio Mode (default)
+
 ```bash
+# Basic usage (stdio mode)
 ALLOW_COMMANDS="ls,cat,echo" uvx mcp-shell-server
 # Or using the alias
 ALLOWED_COMMANDS="ls,cat,echo" uvx mcp-shell-server
+
+# Explicitly specify stdio mode
+ALLOW_COMMANDS="ls,cat,echo" uvx mcp-shell-server stdio
+```
+
+#### SSE Mode
+
+Start the server in Server-Sent Events (SSE) mode:
+
+```bash
+# With default settings (host: 127.0.0.1, port: 8000)
+ALLOW_COMMANDS="ls,cat,echo" uvx mcp-shell-server sse
+
+# With custom host and port
+ALLOW_COMMANDS="ls,cat,echo" uvx mcp-shell-server sse --host 0.0.0.0 --port 9000
+
+# With custom web path
+ALLOW_COMMANDS="ls,cat,echo" uvx mcp-shell-server sse --web-path /shell-web
+```
+
+#### Streamable HTTP Mode
+
+Start the server in streamable HTTP mode:
+
+```bash
+# With default settings (host: 127.0.0.1, port: 8000, path: /mcp)
+ALLOW_COMMANDS="ls,cat,echo" uvx mcp-shell-server http
+
+# With custom host, port and path
+ALLOW_COMMANDS="ls,cat,echo" uvx mcp-shell-server http --host 0.0.0.0 --port 9000 --path /shell-api
+
+# With custom web path
+ALLOW_COMMANDS="ls,cat,echo" uvx mcp-shell-server http --web-path /shell-web
+```
+
+### Starting the Web Interface
+
+The server includes a web management interface for monitoring and managing background processes:
+
+```bash
+# Start with default settings (port 5000)
+ALLOW_COMMANDS="ls,cat,echo" uvx mcp-shell-server --web
+
+# Specify custom port
+ALLOW_COMMANDS="ls,cat,echo" uvx mcp-shell-server --web --port 8080
+
+# Running on a specific host
+ALLOW_COMMANDS="ls,cat,echo" uvx mcp-shell-server --web --host 127.0.0.1
+
+# With URL prefix (for reverse proxy setups)
+ALLOW_COMMANDS="ls,cat,echo" uvx mcp-shell-server --web --url-prefix /shell
 ```
 
 ### Building Standalone Executable
@@ -94,6 +153,9 @@ uv run --extra dev python build_executable.py --proxy http://your-proxy:port
 
 # Quick build with minimal optimizations (faster build time)
 uv run --extra dev python build_executable.py --quick
+
+# Parallel compilation to speed up the build
+uv run --extra dev python build_executable.py --jobs 8
 
 # Testing mode (shows what will be done without executing)
 uv run --extra dev python build_executable.py --test
@@ -158,6 +220,53 @@ set ALLOW_COMMANDS=dir,type,echo,findstr
 set COMSPEC=C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe
 uvx mcp-shell-server
 ```
+
+## Server Modes
+
+The server supports three different operation modes:
+
+### stdio Mode (Default)
+
+Uses standard input/output for communication, ideal for integration with Claude.app and other MCP clients.
+
+### SSE Mode
+
+Server-Sent Events mode allows the server to push updates to clients over HTTP. This is useful for web-based integrations and real-time updates.
+
+Command-line options:
+- `--host`: Server host address (default: 127.0.0.1)
+- `--port`: Server port (default: 8000) 
+- `--web-path`: Web interface path (default: /web)
+
+### Streamable HTTP Mode
+
+Provides a HTTP API endpoint for communication. This mode is suitable for RESTful API integrations.
+
+Command-line options:
+- `--host`: Server host address (default: 127.0.0.1)
+- `--port`: Server port (default: 8000)
+- `--path`: API endpoint path (default: /mcp)
+- `--web-path`: Web interface path (default: /web)
+
+## Web Management Interface
+
+The web interface provides a convenient way to monitor and manage background processes:
+
+### Features
+
+* **Process List View**: See all running and completed processes
+* **Process Detail View**: Examine detailed information about a specific process
+* **Real-time Output Viewing**: Monitor stdout and stderr of running processes
+* **Process Control**: Stop, terminate, and clean up processes
+* **Filtering**: Filter processes by status or labels
+
+### Screenshots
+
+(Insert screenshots here when available)
+
+### Accessing the Web Interface
+
+By default, the web interface is accessible at http://localhost:5000 when started with the `--web` flag.
 
 ## API Reference
 
@@ -348,7 +457,8 @@ Get output from a background process.
     "with_stdout": true,
     "with_stderr": true,
     "add_time_prefix": true,
-    "time_prefix_format": "%Y-%m-%d %H:%M:%S.%f"
+    "time_prefix_format": "%Y-%m-%d %H:%M:%S.%f",
+    "follow_seconds": 5
 }
 ```
 
@@ -383,6 +493,7 @@ Get output from a background process.
 | with_stderr        | boolean    | No       | Show error output (default: false)            |
 | add_time_prefix    | boolean    | No       | Add timestamp prefix to each output line (default: true) |
 | time_prefix_format | string     | No       | Format for timestamp prefix (default: "%Y-%m-%d %H:%M:%S.%f") |
+| follow_seconds     | integer    | No       | Wait for specified seconds to get new logs    |
 
 #### Response Fields
 
@@ -390,6 +501,74 @@ Get output from a background process.
 |-----------|---------|---------------------------------------------|
 | type      | string  | Always "text"                              |
 | text      | string  | Process information and output with optional timestamps |
+
+### Tool: shell_bg_clean
+
+Clean up completed or failed background processes.
+
+#### Request Format
+
+```json
+{
+    "process_ids": ["process_123", "process_456"]
+}
+```
+
+#### Response Format
+
+```json
+{
+    "type": "text",
+    "text": "PROCESS ID | STATUS | MESSAGE\n---------\nprocess_123 | SUCCESS | Process cleaned successfully\nprocess_456 | FAILED | Process is still running"
+}
+```
+
+#### Request Arguments
+
+| Field       | Type       | Required | Description                                   |
+|-------------|------------|----------|-----------------------------------------------|
+| process_ids | string[]   | Yes      | List of process IDs to clean up               |
+
+#### Response Fields
+
+| Field     | Type    | Description                                |
+|-----------|---------|---------------------------------------------|
+| type      | string  | Always "text"                              |
+| text      | string  | Formatted table of cleanup results          |
+
+### Tool: shell_bg_detail
+
+Get detailed information about a specific background process.
+
+#### Request Format
+
+```json
+{
+    "process_id": "process_123"
+}
+```
+
+#### Response Format
+
+```json
+{
+    "type": "text",
+    "text": "### Process Details: process_123\n\n#### Basic Information\n- **Status**: completed\n- **Command**: `npm start`\n- **Description**: Start Node.js application\n- **Labels**: nodejs, app\n\n#### Timing\n- **Started**: 2023-05-06 14:30:00\n- **Ended**: 2023-05-06 14:35:27\n- **Duration**: 0:05:27\n\n#### Execution\n- **Working Directory**: /path/to/project\n- **Exit Code**: 0\n\n#### Output Information\n- Use `shell_bg_logs` tool to view process output\n- Example: `shell_bg_logs(process_id='process_123')`"
+}
+```
+
+#### Request Arguments
+
+| Field       | Type       | Required | Description                                   |
+|-------------|------------|----------|-----------------------------------------------|
+| process_id  | string     | Yes      | ID of the process to get details for          |
+
+#### Response Fields
+
+| Field     | Type    | Description                                |
+|-----------|---------|---------------------------------------------|
+| type      | string  | Always "text"                              |
+| text      | string  | Formatted detailed information about the process |
 
 ## Security
 

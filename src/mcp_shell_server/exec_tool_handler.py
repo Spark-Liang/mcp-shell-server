@@ -54,7 +54,7 @@ class ExecuteToolHandler(ToolHandler[ShellExecuteArgs]):
 
     @property
     def description(self) -> str:
-        base_description = "Execute a shell command"
+        base_description = "Execute a shell command **in foreground**"
         allowed_commands = self.get_allowed_commands()
         return f"{base_description}.\nAllowed commands: {', '.join(allowed_commands)}"
 

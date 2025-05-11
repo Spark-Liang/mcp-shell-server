@@ -10,6 +10,7 @@ import sys
 import platform
 import time
 import shutil
+import multiprocessing  # 导入多处理模块获取CPU核心数
 
 def verify_executable(exe_path):
     """验证可执行文件是否存在且可执行"""
@@ -50,6 +51,8 @@ def main():
     parser.add_argument("--quick", action="store_true", help="快速构建模式，减少优化")
     parser.add_argument("--test", action="store_true", help="测试模式，仅输出命令不执行")
     parser.add_argument("--verify", action="store_true", help="仅验证可执行文件")
+    parser.add_argument("--jobs", "-j", type=int, default=1, 
+                      help=f"并行编译的任务数量 (默认: 1")
     args = parser.parse_args()
     
     # 确定输出文件名
@@ -89,6 +92,7 @@ def main():
     print(f"[{time.time() - start_time:.2f}s] 入口模块: {entry_module}")
     
     print(f"[{time.time() - start_time:.2f}s] 输出文件: {output_path}")
+    print(f"[{time.time() - start_time:.2f}s] 并行任务数: {args.jobs}")
     
     # 基础 Nuitka 命令及参数
     nuitka_cmd = [
@@ -98,6 +102,7 @@ def main():
         "--no-pyi-file",  # 不生成 .pyi 文件
         "--assume-yes-for-downloads",  # 自动下载所需组件
         "--include-package=mcp_shell_server",  # 包含主包
+        f"--jobs={args.jobs}",  # 设置并行编译的任务数量
     ]
     
     # 快速构建模式减少优化级别

@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>后台进程管理</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background-color: #fff;
+            padding: 20px;
+            border-radius: 5px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+        }
+        h1 {
+            color: #333;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+        th, td {
+            padding: 12px;
+            border: 1px solid #ddd;
+            text-align: left;
+        }
+        th {
+            background-color: #f2f2f2;
+            font-weight: bold;
+        }
+        tr:nth-child(even) {
+            background-color: #f9f9f9;
+        }
+        .actions {
+            display: flex;
+            gap: 5px;
+        }
+        .btn {
+            padding: 5px 10px;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        .btn-view {
+            background-color: #4CAF50;
+            color: white;
+        }
+        .btn-stop {
+            background-color: #f44336;
+            color: white;
+        }
+        .btn-clean {
+            background-color: #2196F3;
+            color: white;
+        }
+        .status-running {
+            color: green;
+            font-weight: bold;
+        }
+        .status-completed {
+            color: blue;
+        }
+        .status-failed, .status-error {
+            color: red;
+        }
+        .status-terminated {
+            color: orange;
+        }
+        .filters {
+            margin-bottom: 20px;
+            padding: 15px;
+            background-color: #f8f8f8;
+            border-radius: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>后台进程管理</h1>
+        
+        <div class="filters">
+            <h3>筛选</h3>
+            <form id="filterForm">
+                <label for="status">状态：</label>
+                <select id="status" name="status">
+                    <option value="">全部</option>
+                    <option value="running">运行中</option>
+                    <option value="completed">已完成</option>
+                    <option value="failed">失败</option>
+                    <option value="terminated">已终止</option>
+                    <option value="error">错误</option>
+                </select>
+                <button type="button" id="applyFilter">应用筛选</button>
+                <button type="button" id="resetFilter">重置</button>
+            </form>
+        </div>
+        
+        <table id="processTable">
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>命令</th>
+                    <th>描述</th>
+                    <th>状态</th>
+                    <th>开始时间</th>
+                    <th>结束时间</th>
+                    <th>操作</th>
+                </tr>
+            </thead>
+            <tbody id="processList">
+                <!-- 进程列表将通过JavaScript加载 -->
+            </tbody>
+        </table>
+    </div>
+
+    <script>
+        // 页面加载完成后获取进程列表
+        document.addEventListener('DOMContentLoaded', function() {
+            loadProcesses();
+            
+            // 筛选按钮点击事件
+            document.getElementById('applyFilter').addEventListener('click', loadProcesses);
+            
+            // 重置按钮点击事件
+            document.getElementById('resetFilter').addEventListener('click', function() {
+                document.getElementById('status').value = '';
+                loadProcesses();
+            });
+        });
+        
+        // 加载进程列表
+        function loadProcesses() {
+            const status = document.getElementById('status').value;
+            let url = '/api/processes';
+            
+            if (status) {
+                url += `?status=${status}`;
+            }
+            
+            fetch(url)
+                .then(response => response.json())
+                .then(processes => {
+                    displayProcesses(processes);
+                })
+                .catch(error => {
+                    console.error('获取进程列表失败:', error);
+                });
+        }
+        
+        // 显示进程列表
+        function displayProcesses(processes) {
+            const processList = document.getElementById('processList');
+            processList.innerHTML = '';
+            
+            if (processes.length === 0) {
+                processList.innerHTML = '<tr><td colspan="7" style="text-align: center;">没有找到进程</td></tr>';
+                return;
+            }
+            
+            processes.forEach(process => {
+                const tr = document.createElement('tr');
+                
+                // 格式化命令显示
+                let cmdText = process.command.join(' ');
+                if (cmdText.length > 30) {
+                    cmdText = cmdText.substring(0, 27) + '...';
+                }
+                
+                // 格式化时间显示
+                const startTime = formatDateTime(process.start_time);
+                const endTime = process.end_time ? formatDateTime(process.end_time) : '-';
+                
+                // 添加状态样式类
+                const statusClass = `status-${process.status}`;
+                
+                tr.innerHTML = `
+                    <td>${process.process_id.substring(0, 8)}</td>
+                    <td title="${process.command.join(' ')}">${cmdText}</td>
+                    <td>${process.description}</td>
+                    <td class="${statusClass}">${process.status}</td>
+                    <td>${startTime}</td>
+                    <td>${endTime}</td>
+                    <td class="actions">
+                        <button class="btn btn-view" onclick="viewProcess('${process.process_id}')">查看</button>
+                        ${process.status === 'running' ? 
+                            `<button class="btn btn-stop" onclick="stopProcess('${process.process_id}')">停止</button>` : 
+                            `<button class="btn btn-clean" onclick="cleanProcess('${process.process_id}')">清理</button>`
+                        }
+                    </td>
+                `;
+                
+                processList.appendChild(tr);
+            });
+        }
+        
+        // 格式化日期时间
+        function formatDateTime(isoString) {
+            if (!isoString) return '-';
+            const date = new Date(isoString);
+            return `${date.getFullYear()}-${padZero(date.getMonth() + 1)}-${padZero(date.getDate())} ${padZero(date.getHours())}:${padZero(date.getMinutes())}:${padZero(date.getSeconds())}`;
+        }
+        
+        // 补零函数
+        function padZero(num) {
+            return num.toString().padStart(2, '0');
+        }
+        
+        // 查看进程详情
+        function viewProcess(processId) {
+            window.location.href = `/process/${processId}`;
+        }
+        
+        // 停止进程
+        function stopProcess(processId) {
+            if (confirm('确定要停止此进程吗？')) {
+                fetch(`/api/process/${processId}/stop`, {
+                    method: 'POST'
+                })
+                .then(response => response.json())
+                .then(result => {
+                    alert(result.message || '进程已停止');
+                    loadProcesses();
+                })
+                .catch(error => {
+                    console.error('停止进程失败:', error);
+                    alert('停止进程失败');
+                });
+            }
+        }
+        
+        // 清理进程
+        function cleanProcess(processId) {
+            if (confirm('确定要清理此进程吗？此操作不可撤销。')) {
+                fetch(`/api/process/${processId}/clean`, {
+                    method: 'POST'
+                })
+                .then(response => response.json())
+                .then(result => {
+                    alert(result.message || '进程已清理');
+                    loadProcesses();
+                })
+                .catch(error => {
+                    console.error('清理进程失败:', error);
+                    alert('清理进程失败');
+                });
+            }
+        }
+    </script>
+</body>
+</html> 
