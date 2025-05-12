@@ -67,7 +67,7 @@ async def test_create_process(bg_process_manager, cleanup_bg_processes):
         assert bg_process.description == "Test background process"
         assert bg_process.labels == ["test"]
         assert bg_process.status == ProcessStatus.RUNNING
-        assert bg_process.process == mock_proc
+        assert bg_process.process.pid == mock_proc.pid
         
         # 验证stdin写入
         mock_proc.stdin.write.assert_called_once()
@@ -500,38 +500,29 @@ async def test_process_timeout(bg_process_manager, cleanup_bg_processes):
 async def test_execute_pipeline(bg_process_manager, cleanup_bg_processes):
     """测试管道命令执行功能"""
     # 创建模拟进程
-    mock_proc = MagicMock()
-    mock_proc.returncode = 0
-    mock_proc.communicate = MagicMock(return_value=(b"pipeline output", b""))
-    mock_proc.wait = MagicMock(return_value=asyncio.Future())
-    mock_proc.stdout = MagicMock()
-    mock_proc.stderr = MagicMock()
-    mock_proc.stdin = MagicMock()
-    mock_proc.stdin.drain = MagicMock()
-    mock_proc.stdin.close = MagicMock()
+    mock_proc1 = MagicMock()
+    mock_proc1.returncode = 0
+    mock_proc1.communicate = AsyncMock(return_value=(b"output1", b""))
+    
+    mock_proc2 = MagicMock()
+    mock_proc2.returncode = 0
+    mock_proc2.communicate = AsyncMock(return_value=(b"pipeline output", b""))
+    
+    mock_proc3 = MagicMock()
+    mock_proc3.returncode = 0
+    mock_proc3.communicate = AsyncMock(return_value=(b"final output", b""))
     
     # 准备测试命令
     commands = ["ls -la", "grep txt", "wc -l"]
-    expected_pipeline = "ls -la | grep txt | wc -l"
     temp_dir = tempfile.gettempdir()
     
     with patch(
         "asyncio.create_subprocess_shell", 
         new_callable=AsyncMock, 
-        return_value=mock_proc
-    ) as mock_create, patch(
-        "asyncio.iscoroutinefunction",
-        return_value=False
-    ), patch.object(
-        bg_process_manager, "_monitor_process", AsyncMock()
-    ), patch.object(
-        bg_process_manager, "start_process", AsyncMock()
-    ) as mock_start_process:
-        # 模拟start_process返回一个进程ID
-        mock_start_process.return_value = "test-pipeline-id"
-        
+        side_effect=[mock_proc1, mock_proc2, mock_proc3]
+    ) as mock_create:
         # 执行管道命令
-        proc_id = await bg_process_manager.execute_pipeline(
+        stdout, stderr, return_code = await bg_process_manager.execute_pipeline(
             commands=commands,
             directory=temp_dir,
             description="测试管道命令",
@@ -539,20 +530,22 @@ async def test_execute_pipeline(bg_process_manager, cleanup_bg_processes):
             first_stdin="test input",
         )
         
-        # 验证进程ID
-        assert proc_id == "test-pipeline-id"
+        # 验证返回结果
+        assert stdout == b"final output"
+        assert stderr == b""
+        assert return_code == 0
         
-        # 验证start_process被正确调用
-        mock_start_process.assert_called_once()
-        call_args = mock_start_process.call_args[1]
-        assert call_args["shell_cmd"] == expected_pipeline
-        assert call_args["directory"] == temp_dir
-        assert call_args["description"] == "测试管道命令"
-        assert call_args["labels"] == ["test", "pipeline"]
-        assert call_args["stdin"] == "test input"
+        # 验证进程创建次数
+        assert mock_create.call_count == 3
+        
+        # 验证各命令被正确执行
+        calls = mock_create.call_args_list
+        assert "ls -la" in calls[0].args[0]
+        assert "grep txt" in calls[1].args[0]
+        assert "wc -l" in calls[2].args[0]
         
     # 测试空命令列表
-    with pytest.raises(ValueError, match="命令列表不能为空"):
+    with pytest.raises(ValueError, match="No commands provided"):
         await bg_process_manager.execute_pipeline(
             commands=[],
             directory=temp_dir,

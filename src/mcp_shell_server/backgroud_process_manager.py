@@ -90,6 +90,169 @@ class BackgroundProcess:
         self.cleanup_scheduled = False  # 是否已安排清理
         self.cleanup_handle = None  # 清理任务句柄
 
+    @property
+    def returncode(self) -> Optional[int]:
+        """获取进程返回码，兼容 asyncio.subprocess.Process 接口。
+
+        Returns:
+            Optional[int]: 进程返回码，如果进程未结束则为 None
+        """
+        if self.process:
+            return self.process.returncode
+        return self.exit_code
+    
+    @property
+    def pid(self) -> Optional[int]:
+        """获取进程 PID，兼容 asyncio.subprocess.Process 接口。
+
+        Returns:
+            Optional[int]: 进程 PID，如果进程不存在则为 None
+        """
+        if self.process:
+            return self.process.pid
+        return None
+
+    @property
+    def stdin(self) -> Optional[asyncio.StreamWriter]:
+        """获取进程标准输入流，兼容 asyncio.subprocess.Process 接口。
+
+        Returns:
+            Optional[asyncio.StreamWriter]: 进程标准输入流，如果不存在则为 None
+        """
+        if self.process:
+            return self.process.stdin
+        return None
+    
+    @property
+    def stdout(self) -> Optional[asyncio.StreamReader]:
+        """获取进程标准输出流，兼容 asyncio.subprocess.Process 接口。
+
+        Returns:
+            Optional[asyncio.StreamReader]: 进程标准输出流，如果不存在则为 None
+        """
+        if self.process:
+            return self.process.stdout
+        return None
+    
+    @property
+    def stderr(self) -> Optional[asyncio.StreamReader]:
+        """获取进程标准错误流，兼容 asyncio.subprocess.Process 接口。
+
+        Returns:
+            Optional[asyncio.StreamReader]: 进程标准错误流，如果不存在则为 None
+        """
+        if self.process:
+            return self.process.stderr
+        return None
+
+    def __getattr__(self, name: str) -> Any:
+        """转发未定义的属性和方法到内部 process 对象，提供兼容性。
+        
+        Args:
+            name: 属性或方法名
+            
+        Returns:
+            Any: 属性值或方法
+            
+        Raises:
+            AttributeError: 如果属性或方法不存在
+        """
+        if self.process is not None:
+            return getattr(self.process, name)
+        raise AttributeError(f"'BackgroundProcess' object has no attribute '{name}' and internal process is None")
+
+    async def wait(self) -> int:
+        """等待进程结束，兼容 asyncio.subprocess.Process 接口。
+        
+        Returns:
+            int: 进程退出码
+            
+        Raises:
+            RuntimeError: 如果内部进程不存在且没有记录退出码
+        """
+        if self.process:
+            return await self.process.wait()
+        
+        # 如果内部进程不存在但有退出码，直接返回
+        if self.exit_code is not None:
+            return self.exit_code
+            
+        # 如果进程不存在且没有退出码，可能是异常情况
+        raise RuntimeError("等待进程结束失败: 内部进程不存在且没有退出码")
+        
+    async def communicate(self, input: Optional[bytes] = None, *, timeout: Optional[float] = None) -> Tuple[bytes, bytes]:
+        """与进程通信并获取其输出，兼容 asyncio.subprocess.Process 接口。
+        
+        Args:
+            input: 发送到进程的输入数据
+            timeout: 通信的超时时间（秒）
+            
+        Returns:
+            Tuple[bytes, bytes]: 包含标准输出和标准错误的元组
+            
+        Raises:
+            RuntimeError: 如果内部进程不存在
+            TimeoutError: 如果通信超时
+        """
+        if self.process:
+            return await self.process.communicate(input=input, timeout=timeout)
+            
+        # 如果内部进程不存在，尝试从日志中获取输出
+        if self._stdout_logger and self._stderr_logger:
+            stdout_logs = self._stdout_logger.get_logs()
+            stderr_logs = self._stderr_logger.get_logs()
+            
+            # 将日志记录转换为字节字符串
+            stdout_bytes = "\n".join([log["text"] for log in stdout_logs]).encode(self.encoding)
+            stderr_bytes = "\n".join([log["text"] for log in stderr_logs]).encode(self.encoding)
+            
+            return stdout_bytes, stderr_bytes
+            
+        # 如果进程和日志都不存在，抛出异常
+        raise RuntimeError("无法与进程通信: 内部进程不存在且无法获取日志")
+
+    def terminate(self) -> None:
+        """终止进程，兼容 asyncio.subprocess.Process 接口。
+        
+        Raises:
+            RuntimeError: 如果内部进程不存在
+        """
+        if self.process:
+            self.process.terminate()
+            self.status = ProcessStatus.TERMINATED
+            self.end_time = datetime.now()
+            return
+        
+        # 如果内部进程不存在，设置状态并记录日志
+        if self.status in [ProcessStatus.RUNNING, ProcessStatus.ERROR]:
+            self.status = ProcessStatus.TERMINATED
+            self.end_time = datetime.now()
+            self.add_error("进程被请求终止，但内部进程对象不存在")
+        else:
+            # 如果进程已经不在运行状态，则忽略终止请求
+            pass
+    
+    def kill(self) -> None:
+        """强制终止进程，兼容 asyncio.subprocess.Process 接口。
+        
+        Raises:
+            RuntimeError: 如果内部进程不存在
+        """
+        if self.process:
+            self.process.kill()
+            self.status = ProcessStatus.TERMINATED
+            self.end_time = datetime.now()
+            return
+        
+        # 如果内部进程不存在，设置状态并记录日志
+        if self.status in [ProcessStatus.RUNNING, ProcessStatus.ERROR]:
+            self.status = ProcessStatus.TERMINATED
+            self.end_time = datetime.now()
+            self.add_error("进程被请求强制终止，但内部进程对象不存在")
+        else:
+            # 如果进程已经不在运行状态，则忽略终止请求
+            pass
+
     def get_info(self) -> Dict[str, Any]:
         """获取进程基本信息
         
@@ -230,6 +393,51 @@ class BackgroundProcessManager:
         self._original_sigterm_handler = signal.signal(
             signal.SIGTERM, handle_termination
         )
+        
+    async def execute_with_timeout(
+        self,
+        process: Union[asyncio.subprocess.Process, BackgroundProcess],
+        stdin: Optional[bytes] = None,
+        timeout: Optional[float] = None
+    ) -> Tuple[bytes, bytes]:
+        """执行进程并等待其完成，支持超时。兼容 ProcessManager.execute_with_timeout 接口。
+        
+        Args:
+            process: 要执行的进程对象
+            stdin: 要发送到进程的输入数据
+            timeout: 执行的超时时间（秒）
+            
+        Returns:
+            Tuple[bytes, bytes]: 包含标准输出和标准错误的元组
+            
+        Raises:
+            TimeoutError: 如果执行超时
+            RuntimeError: 如果进程执行出错
+        """
+        try:
+            # 如果进程是 BackgroundProcess 类型，尝试使用其 communicate 方法
+            if isinstance(process, BackgroundProcess):
+                # 使用进程的 communicate 方法获取输出
+                return await process.communicate(input=stdin, timeout=timeout)
+            else:
+                # 使用 asyncio.subprocess.Process 的 communicate 方法
+                return await process.communicate(input=stdin, timeout=timeout)
+        except asyncio.TimeoutError as e:
+            # 超时时，尝试终止进程
+            try:
+                process.terminate()
+                # 等待进程响应终止信号
+                try:
+                    await asyncio.wait_for(process.wait(), timeout=2.0)
+                except asyncio.TimeoutError:
+                    # 如果进程在给定时间内未终止，尝试强制终止
+                    process.kill()
+                    await asyncio.wait_for(process.wait(), timeout=1.0)
+            except Exception as term_err:
+                logger.warning(f"终止超时进程时出错: {term_err}")
+                
+            # 重新抛出超时异常
+            raise TimeoutError(f"进程执行超时: {str(e)}")
         
     async def _read_stream(self, stream: asyncio.StreamReader, is_error: bool, bg_process: BackgroundProcess) -> None:
         """持续读取流并存储到日志。
@@ -447,7 +655,7 @@ class BackgroundProcessManager:
         self,
         shell_cmd: str,
         directory: str,
-        description: str,
+        description: str = "Default process description",  # 添加默认值
         labels: Optional[List[str]] = None,
         stdin: Optional[str] = None,
         envs: Optional[Dict[str, str]] = None,
@@ -540,7 +748,7 @@ class BackgroundProcessManager:
         self,
         shell_cmd: str,
         directory: str,
-        description: str,
+        description: str = "Default process description",  # 添加默认值
         labels: Optional[List[str]] = None,
         stdin: Optional[str] = None,
         envs: Optional[Dict[str, str]] = None,
@@ -938,16 +1146,39 @@ class BackgroundProcessManager:
         for output in final_outputs:
             yield output
     
-    async def cleanup_processes(self, labels: Optional[List[str]] = None, status: Optional[ProcessStatus] = None) -> int:
-        """清理已完成的进程，可按标签和状态过滤。
+    async def cleanup_processes(self, processes: Optional[List[Union[asyncio.subprocess.Process, BackgroundProcess]]] = None, labels: Optional[List[str]] = None, status: Optional[ProcessStatus] = None) -> int:
+        """清理进程，可接受进程列表或按标签和状态过滤。
+        
+        这个方法有两种调用方式：
+        1. 传入进程列表: cleanup_processes([process1, process2, ...])
+        2. 按标签或状态过滤: cleanup_processes(labels=["web"], status=ProcessStatus.COMPLETED)
         
         Args:
-            labels: 标签过滤条件
-            status: 状态过滤条件（默认清理所有非running状态的进程）
+            processes: 要清理的进程列表（可选）
+            labels: 标签过滤条件（可选）
+            status: 状态过滤条件（可选）
             
         Returns:
             int: 清理的进程数量
+            
+        Note:
+            当传入进程列表时，标签和状态过滤将被忽略。
         """
+        # 处理直接传入进程列表的情况（用于与 ProcessManager 兼容）
+        if processes is not None:
+            count = 0
+            for proc in processes:
+                if proc.returncode is None:
+                    # 进程仍在运行，尝试终止
+                    proc.kill()
+                    try:
+                        await proc.wait()
+                    except Exception as e:
+                        logger.warning(f"等待进程终止时出错: {e}")
+                    count += 1
+            return count
+        
+        # 按标签和状态过滤清理进程（原有行为）
         to_remove = []
         
         # 查找已完成的进程
@@ -1097,14 +1328,16 @@ class BackgroundProcessManager:
         self,
         commands: List[str],
         directory: str,
-        description: str,
+        description: str = "Default pipeline command",  # 添加默认值
         labels: Optional[List[str]] = None,
         first_stdin: Optional[str] = None,
         envs: Optional[Dict[str, str]] = None,
         encoding: Optional[str] = None,
         timeout: Optional[int] = None,
-    ) -> str:
+    ) -> Tuple[bytes, bytes, int]:
         """执行管道命令序列，将多个命令的执行连接起来。
+        
+        按照顺序执行多个命令，每个命令的输出作为下一个命令的输入。
         
         Args:
             commands: 要执行的命令列表，每个命令作为一个字符串
@@ -1117,34 +1350,93 @@ class BackgroundProcessManager:
             timeout: 整个管道的超时时间(秒)
             
         Returns:
-            str: 创建的后台进程ID
+            Tuple[bytes, bytes, int]: (标准输出, 标准错误, 返回码)的元组
             
         Raises:
             ValueError: 如果命令列表为空或进程创建失败
+            TimeoutError: 如果执行超时
         """
         if not commands:
-            raise ValueError("命令列表不能为空")
+            raise ValueError("No commands provided")
             
-        # 构建管道命令字符串
-        pipeline_cmd = " | ".join(commands)
-        
-        # 构建描述
-        if not description:
-            description = f"管道命令: {pipeline_cmd}"
+        # 将可能的文本输入转换为字节
+        first_stdin_bytes = None
+        if first_stdin is not None:
+            first_stdin_bytes = first_stdin.encode(encoding or 'utf-8')
             
-        # 创建进程
-        process_id = await self.start_process(
-            shell_cmd=pipeline_cmd,  # 作为单个命令传递
-            directory=directory,
-            description=description,
-            labels=labels,
-            stdin=first_stdin,
-            envs=envs,
-            encoding=encoding,
-            timeout=timeout,
-        )
+        processes = []
+        final_stderr = b""
         
-        return process_id
+        try:
+            prev_stdout = first_stdin_bytes
+            
+            # 为每个命令创建一个进程
+            for i, cmd in enumerate(commands):
+                cmd_description = f"{description} - 子命令 {i+1}/{len(commands)}: {cmd}"
+                
+                # 创建进程
+                process = await self.create_process(
+                    shell_cmd=cmd,  # 单个命令
+                    directory=directory,
+                    description=cmd_description,
+                    labels=labels,
+                    encoding=encoding,
+                    timeout=timeout,
+                )
+                processes.append(process)
+                
+                # 执行当前进程，将前一个进程的输出作为输入
+                try:
+                    stdout, stderr = await self.execute_with_timeout(
+                        process,
+                        stdin=prev_stdout,
+                        timeout=timeout
+                    )
+                    
+                    # 累积错误输出
+                    final_stderr += stderr if stderr else b""
+                    
+                    # 检查进程退出状态
+                    if process.returncode != 0:
+                        error_msg = stderr.decode(encoding or 'utf-8', errors='replace').strip()
+                        if not error_msg:
+                            error_msg = f"命令失败，退出码 {process.returncode}"
+                        raise ValueError(error_msg)
+                    
+                    # 最后一个进程的输出是最终输出
+                    if i == len(commands) - 1:
+                        final_stdout = stdout if stdout else b""
+                    else:
+                        # 将当前进程的输出作为下一个进程的输入
+                        prev_stdout = stdout if stdout else b""
+                        
+                except asyncio.TimeoutError:
+                    # 超时发生，确保所有进程都被终止
+                    for p in processes:
+                        if p.returncode is None:
+                            p.kill()
+                    raise
+                except Exception as e:
+                    # 其他错误，确保所有进程都被终止
+                    for p in processes:
+                        if p.returncode is None:
+                            p.kill()
+                    raise e
+            
+            # 获取最后一个进程的退出码
+            return_code = processes[-1].returncode if processes else 1
+            
+            return final_stdout, final_stderr, return_code
+        
+        finally:
+            # 确保所有进程都被清理
+            for process in processes:
+                if process.returncode is None:
+                    try:
+                        process.kill()
+                        await process.wait()
+                    except Exception as e:
+                        logger.warning(f"清理管道进程时出错: {e}")
 
     async def get_process_status_summary(self) -> Dict[str, int]:
         """获取所有进程的状态摘要

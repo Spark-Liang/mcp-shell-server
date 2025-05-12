@@ -1,6 +1,7 @@
 """Tests for the ProcessManager class."""
 
 import asyncio
+import random
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -11,6 +12,7 @@ from mcp_shell_server.backgroud_process_manager import BackgroundProcessManager
 def create_mock_process():
     """Create a mock process with all required attributes."""
     process = MagicMock()
+    process.pid = random.randint(10000, 99999)
     process.returncode = 0
     process.communicate = AsyncMock(return_value=(b"output", b"error"))
     process.wait = AsyncMock(return_value=0)
@@ -30,7 +32,7 @@ async def test_create_process(process_manager):
     """Test creating a process with basic parameters."""
     mock_proc = create_mock_process()
     with patch(
-        "mcp_shell_server.process_manager.asyncio.create_subprocess_shell",
+        "mcp_shell_server.backgroud_process_manager.asyncio.create_subprocess_shell",
         new_callable=AsyncMock,
         return_value=mock_proc,
     ) as mock_create:
@@ -40,8 +42,7 @@ async def test_create_process(process_manager):
             stdin="input",
         )
 
-        assert process == mock_proc
-        assert process == mock_proc
+        assert process.pid == mock_proc.pid
         mock_create.assert_called_once()
 
 
@@ -98,7 +99,7 @@ async def test_execute_pipeline_success(process_manager):
     mock_proc2.returncode = 0
 
     with patch(
-        "mcp_shell_server.process_manager.asyncio.create_subprocess_shell",
+        "mcp_shell_server.backgroud_process_manager.asyncio.create_subprocess_shell",
         new_callable=AsyncMock,
         side_effect=[mock_proc1, mock_proc2],
     ) as mock_create:

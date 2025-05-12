@@ -97,7 +97,7 @@ class StartBackgroundProcessToolHandler(ToolHandler[StartProcessArgs]):
         try:
             # 启动后台进程
             process_id = await background_process_manager.start_process(
-                command=command,
+                shell_cmd=command,
                 directory=directory,
                 description=description,
                 labels=labels,
