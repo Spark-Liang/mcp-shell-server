@@ -53,7 +53,7 @@ async def test_create_process(bg_process_manager, cleanup_bg_processes):
         # 创建一个后台进程
         temp_dir = tempfile.gettempdir()
         bg_process = await bg_process_manager.create_process(
-            command=["echo", "test"],
+            command="echo test",
             directory=temp_dir,
             description="Test background process",
             labels=["test"],
@@ -62,7 +62,7 @@ async def test_create_process(bg_process_manager, cleanup_bg_processes):
         
         # 验证进程创建
         assert bg_process.process_id is not None
-        assert bg_process.command == ["echo", "test"]
+        assert bg_process.command == "echo test"
         assert bg_process.directory == temp_dir
         assert bg_process.description == "Test background process"
         assert bg_process.labels == ["test"]
@@ -94,7 +94,7 @@ async def test_start_process(bg_process_manager, cleanup_bg_processes):
     
     with patch.object(bg_process_manager, "create_process", create_process_mock):
         process_id = await bg_process_manager.start_process(
-            command=["echo", "test"],
+            command="echo test",
             directory=temp_dir,
             description="Test process",
             labels=["test", "example"],
@@ -105,7 +105,7 @@ async def test_start_process(bg_process_manager, cleanup_bg_processes):
         
         # 验证create_process被正确调用
         create_process_mock.assert_awaited_once_with(
-            command=["echo", "test"],
+            command="echo test",
             directory=temp_dir,
             description="Test process",
             labels=["test", "example"],
@@ -462,7 +462,7 @@ async def test_process_timeout(bg_process_manager, cleanup_bg_processes):
     ) as add_error_mock:
         # 创建一个有超时设置的后台进程
         proc_id = await bg_process_manager.start_process(
-            command=["sleep", "10"],  # 不会实际执行
+            command="sleep 10",  # 不会实际执行
             directory=tempfile.gettempdir(),
             description="超时测试进程",
             timeout=1  # 1秒超时
@@ -524,7 +524,12 @@ async def test_execute_pipeline(bg_process_manager, cleanup_bg_processes):
         return_value=False
     ), patch.object(
         bg_process_manager, "_monitor_process", AsyncMock()
-    ):
+    ), patch.object(
+        bg_process_manager, "start_process", AsyncMock()
+    ) as mock_start_process:
+        # 模拟start_process返回一个进程ID
+        mock_start_process.return_value = "test-pipeline-id"
+        
         # 执行管道命令
         proc_id = await bg_process_manager.execute_pipeline(
             commands=commands,
@@ -534,22 +539,17 @@ async def test_execute_pipeline(bg_process_manager, cleanup_bg_processes):
             first_stdin="test input",
         )
         
-        # 验证进程创建
-        assert proc_id is not None
-        bg_process = bg_process_manager._processes[proc_id]
+        # 验证进程ID
+        assert proc_id == "test-pipeline-id"
         
-        # 验证命令被正确构建
-        mock_create.assert_called_once()
-        call_args = mock_create.call_args[0][0]
-        assert expected_pipeline in call_args
-        
-        # 验证进程属性
-        assert bg_process.description == "测试管道命令"
-        assert set(bg_process.labels) == set(["test", "pipeline"])
-        assert bg_process.directory == temp_dir
-        
-        # 验证stdin被传递
-        mock_proc.stdin.write.assert_called_once()
+        # 验证start_process被正确调用
+        mock_start_process.assert_called_once()
+        call_args = mock_start_process.call_args[1]
+        assert call_args["command"] == expected_pipeline
+        assert call_args["directory"] == temp_dir
+        assert call_args["description"] == "测试管道命令"
+        assert call_args["labels"] == ["test", "pipeline"]
+        assert call_args["stdin"] == "test input"
         
     # 测试空命令列表
     with pytest.raises(ValueError, match="命令列表不能为空"):
@@ -557,7 +557,7 @@ async def test_execute_pipeline(bg_process_manager, cleanup_bg_processes):
             commands=[],
             directory=temp_dir,
             description="空命令测试",
-        ) 
+        )
 
 @pytest.mark.asyncio
 async def test_get_process_status_summary(bg_process_manager):
@@ -622,7 +622,7 @@ async def test_auto_cleanup_processes():
             # 手动创建已完成的进程对象
             process1 = BackgroundProcess(
                 process_id="test1",
-                command=["echo", "test1"],
+                command="echo test1",
                 directory=temp_dir,
                 description="Test process 1"
             )
@@ -631,7 +631,7 @@ async def test_auto_cleanup_processes():
             
             process2 = BackgroundProcess(
                 process_id="test2",
-                command=["echo", "test2"],
+                command="echo test2",
                 directory=temp_dir,
                 description="Test process 2"
             )
@@ -641,7 +641,7 @@ async def test_auto_cleanup_processes():
             # 模拟一个仍在运行的进程
             process3 = BackgroundProcess(
                 process_id="test3",
-                command=["echo", "test3"],
+                command="echo test3",
                 directory=temp_dir,
                 description="Test process 3"
             )

@@ -394,7 +394,7 @@ class ShellExecutor:
             # プロセス通信実行
             stdout, stderr = await asyncio.shield(
                 self.process_manager.execute_with_timeout(
-                    process, stdin=stdin, timeout=timeout
+                    process, stdin=stdin_bytes, timeout=timeout
                 )
             )
 

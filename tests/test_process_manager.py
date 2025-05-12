@@ -54,7 +54,7 @@ async def test_execute_with_timeout_success(process_manager):
 
     stdout, stderr = await process_manager.execute_with_timeout(
         mock_proc,
-        stdin="input",
+        stdin=b"input",
         timeout=10,
     )
 

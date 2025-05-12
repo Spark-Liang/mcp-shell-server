@@ -31,7 +31,7 @@ class BackgroundProcess:
     """表示一个后台运行的进程"""
     def __init__(self, 
                 process_id: str, 
-                command: List[str], 
+                command: str, 
                 directory: str,
                 description: str,  # 描述是必填项
                 labels: Optional[List[str]] = None,
@@ -42,7 +42,7 @@ class BackgroundProcess:
         
         Args:
             process_id: 进程唯一标识符
-            command: 命令及参数列表
+            command: 要执行的命令字符串
             directory: 工作目录
             description: 进程描述(必填)
             labels: 用于分类的标签列表
@@ -51,7 +51,7 @@ class BackgroundProcess:
             timeout: 超时时间(秒)
         """
         self.process_id = process_id  # 随机字符串作为唯一标识
-        self.command = command  # 命令列表
+        self.command = command  # 命令字符串
         self.directory = directory  # 工作目录
         self.description = description  # 命令描述
         self.labels = labels or []  # 标签列表
@@ -445,7 +445,7 @@ class BackgroundProcessManager:
 
     async def create_process(
         self,
-        command: List[str],
+        command: str,
         directory: str,
         description: str,
         labels: Optional[List[str]] = None,
@@ -457,7 +457,7 @@ class BackgroundProcessManager:
         """创建一个新的后台进程。
 
         Args:
-            command: 要执行的命令及参数列表
+            command: 要执行的命令字符串
             directory: 工作目录
             description: 进程描述
             labels: 进程标签列表
@@ -473,7 +473,7 @@ class BackgroundProcessManager:
             ValueError: 如果进程创建失败
         """
         process_id = str(uuid.uuid4())[:5]
-        shell_cmd = " ".join(command)
+        shell_cmd = command
         
         # 记录进程启动详细信息
         logger.info(f"启动进程 {process_id}:")
@@ -539,7 +539,7 @@ class BackgroundProcessManager:
             
     async def start_process(
         self,
-        command: List[str],
+        command: str,
         directory: str,
         description: str,
         labels: Optional[List[str]] = None,
@@ -551,7 +551,7 @@ class BackgroundProcessManager:
         """启动一个后台进程并返回其ID。
 
         Args:
-            command: 要执行的命令及参数列表
+            command: 要执行的命令字符串
             directory: 工作目录
             description: 命令描述(必填)
             labels: 标签列表
@@ -1135,7 +1135,7 @@ class BackgroundProcessManager:
             
         # 创建进程
         process_id = await self.start_process(
-            command=[pipeline_cmd],  # 作为单个命令传递
+            command=pipeline_cmd,  # 作为单个命令传递
             directory=directory,
             description=description,
             labels=labels,

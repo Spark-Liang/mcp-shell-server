@@ -169,14 +169,14 @@ class ProcessManager:
     async def execute_with_timeout(
         self,
         process: asyncio.subprocess.Process,
-        stdin: Optional[str] = None,
+        stdin: Optional[bytes] = None,
         timeout: Optional[int] = None,
     ) -> Tuple[bytes, bytes]:
         """Execute the process with timeout handling.
 
         Args:
             process: Process to execute
-            stdin (Optional[str]): Input to pass to the process
+            stdin (Optional[bytes]): Input to pass to the process as bytes
             timeout (Optional[int]): Timeout in seconds
 
         Returns:
@@ -185,7 +185,7 @@ class ProcessManager:
         Raises:
             asyncio.TimeoutError: If execution times out
         """
-        stdin_bytes = stdin.encode() if stdin else None
+        stdin_bytes = stdin
 
         async def _kill_process():
             if process.returncode is not None:
@@ -272,7 +272,7 @@ class ProcessManager:
                 try:
                     stdout, stderr = await self.execute_with_timeout(
                         process,
-                        stdin=prev_stdout.decode() if prev_stdout else None,
+                        stdin=prev_stdout,
                         timeout=timeout,
                     )
 
