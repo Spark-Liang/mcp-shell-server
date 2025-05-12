@@ -1,0 +1,151 @@
+{
+  "tasks": [
+    {
+      "id": "8fd01c72-b892-4784-ad15-755a929187a5",
+      "name": "创建 ShellExecutionResult Pydantic 模型类",
+      "description": "创建一个 ShellExecutionResult Pydantic 模型类，用于表示命令执行结果。模型字段必须与当前返回字典的字段保持一致，包括 error, status, stdout, stderr, execution_time, returncode 和 directory。所有字段都应有适当的类型注解和默认值。",
+      "status": "待處理",
+      "dependencies": [],
+      "createdAt": "2025-05-12T03:56:11.445Z",
+      "updatedAt": "2025-05-12T03:56:11.445Z",
+      "relatedFiles": [
+        {
+          "path": "src/mcp_shell_server/shell_executor.py",
+          "type": "TO_MODIFY",
+          "description": "需要在此文件中添加 ShellExecutionResult Pydantic 模型类"
+        }
+      ],
+      "implementationGuide": "1. 在 shell_executor.py 文件顶部添加必要的导入：`from pydantic import BaseModel`和`from typing import Optional, Any, Dict, Union`\n2. 创建 ShellExecutionResult 类：\n```python\nclass ShellExecutionResult(BaseModel):\n    \"\"\"命令执行结果模型\"\"\"\n    error: Optional[str] = None\n    status: int = 0\n    stdout: str = \"\"\n    stderr: str = \"\"\n    execution_time: float = 0.0\n    returncode: Optional[int] = None\n    directory: Optional[str] = None\n```\n3. 确保所有字段名称与现有返回字典中的字段名称完全一致，保持向后兼容性。\n4. 添加适当的类文档。",
+      "verificationCriteria": "1. 模型包含所有必要的字段：error, status, stdout, stderr, execution_time, returncode, directory\n2. 所有字段都有正确的类型注解和默认值\n3. 代码能够成功导入和编译，不会引发语法错误\n4. 模型定义符合 Pydantic 规范",
+      "analysisResult": "## 详细分析\n\n### 1. 当前代码状态分析\n\n经过对 `shell_executor.py` 的详细分析，发现当前的 `execute` 方法存在以下问题：\n\n1. **方法过长且职责混杂**：该方法包含参数验证、命令预处理、执行和错误处理等多种职责。\n2. **直接返回字典格式**：没有使用结构化的模型来表示返回值，缺乏类型安全性。\n3. **错误处理机制分散**：异常处理和错误响应格式化逻辑与核心业务逻辑混合。\n\n当前返回字典的字段包括：\n- `error`：错误信息，成功时为 None\n- `status`：命令执行状态码\n- `stdout`：标准输出内容\n- `stderr`：标准错误输出\n- `execution_time`：执行时间\n- `returncode`：进程返回码（某些情况下存在）\n- `directory`：执行目录（某些情况下存在）\n\n我们将采用渐进式开发策略，按照以下顺序进行重构，每一步完成后运行测试验证功能：\n\n1. 创建 Pydantic 模型和异常类\n2. 创建 _do_execute 方法\n3. 重构 execute 方法\n4. 更新相关的辅助方法\n\n保持向后兼容性至关重要，我们将通过默认返回字典格式并提供选项参数来确保现有客户端代码不受影响。"
+    },
+    {
+      "id": "2fad9837-3766-4dde-afc3-51436c318445",
+      "name": "创建自定义异常类体系",
+      "description": "创建一个自定义异常类体系，包括基础的 ShellExecutionError 类及其各种特定场景的子类。异常类应包含足够的上下文信息，以便于生成标准响应格式。所有异常类都应继承自基础异常类，并添加适当的文档说明。",
+      "status": "待處理",
+      "dependencies": [],
+      "createdAt": "2025-05-12T03:56:11.446Z",
+      "updatedAt": "2025-05-12T03:56:11.446Z",
+      "relatedFiles": [
+        {
+          "path": "src/mcp_shell_server/shell_executor.py",
+          "type": "TO_MODIFY",
+          "description": "需要在此文件中添加异常类体系"
+        }
+      ],
+      "implementationGuide": "1. 在 shell_executor.py 文件中添加以下异常类定义：\n```python\nclass ShellExecutionError(Exception):\n    \"\"\"基础 shell 执行错误类\"\"\"\n    def __init__(self, message: str, status: int = 1):\n        self.message = message\n        self.status = status\n        super().__init__(message)\n\nclass DirectoryError(ShellExecutionError):\n    \"\"\"目录相关错误\"\"\"\n    pass\n\nclass CommandValidationError(ShellExecutionError):\n    \"\"\"命令验证错误\"\"\"\n    pass\n\nclass CommandExecutionError(ShellExecutionError):\n    \"\"\"命令执行错误\"\"\"\n    pass\n\nclass CommandTimeoutError(ShellExecutionError):\n    \"\"\"命令执行超时错误\"\"\"\n    def __init__(self, message: str, timeout: int):\n        self.timeout = timeout\n        super().__init__(message, status=-1)\n\nclass IORedirectionError(ShellExecutionError):\n    \"\"\"IO 重定向错误\"\"\"\n    pass\n\nclass PipelineError(ShellExecutionError):\n    \"\"\"管道执行错误\"\"\"\n    pass\n```\n2. 确保所有异常类都有适当的文档字符串\n3. 重要子类（如 CommandTimeoutError）应有特定的初始化参数，以捕获更多上下文",
+      "verificationCriteria": "1. 异常类层次结构完整，包括基类和所有子类\n2. 每个异常类都有必要的属性和方法\n3. 异常类能够正确传递错误消息和状态码\n4. 特殊异常类（如 CommandTimeoutError）能够捕获和存储额外的上下文信息",
+      "analysisResult": "## 详细分析\n\n### 1. 当前代码状态分析\n\n经过对 `shell_executor.py` 的详细分析，发现当前的 `execute` 方法存在以下问题：\n\n1. **方法过长且职责混杂**：该方法包含参数验证、命令预处理、执行和错误处理等多种职责。\n2. **直接返回字典格式**：没有使用结构化的模型来表示返回值，缺乏类型安全性。\n3. **错误处理机制分散**：异常处理和错误响应格式化逻辑与核心业务逻辑混合。\n\n当前返回字典的字段包括：\n- `error`：错误信息，成功时为 None\n- `status`：命令执行状态码\n- `stdout`：标准输出内容\n- `stderr`：标准错误输出\n- `execution_time`：执行时间\n- `returncode`：进程返回码（某些情况下存在）\n- `directory`：执行目录（某些情况下存在）\n\n我们将采用渐进式开发策略，按照以下顺序进行重构，每一步完成后运行测试验证功能：\n\n1. 创建 Pydantic 模型和异常类\n2. 创建 _do_execute 方法\n3. 重构 execute 方法\n4. 更新相关的辅助方法\n\n保持向后兼容性至关重要，我们将通过默认返回字典格式并提供选项参数来确保现有客户端代码不受影响。"
+    },
+    {
+      "id": "adfc3493-cb15-4266-b3c1-63fff3b0212b",
+      "name": "实现 _do_execute 核心执行方法",
+      "description": "创建 _do_execute 方法，将 execute 方法中的核心执行逻辑抽离出来。这个方法应负责命令执行的核心流程，遇到错误时应抛出相应的自定义异常，而不是直接返回错误字典。保持与原 execute 方法相同的参数结构，确保功能一致性。",
+      "status": "待處理",
+      "dependencies": [
+        {
+          "taskId": "8fd01c72-b892-4784-ad15-755a929187a5"
+        },
+        {
+          "taskId": "2fad9837-3766-4dde-afc3-51436c318445"
+        }
+      ],
+      "createdAt": "2025-05-12T03:56:11.446Z",
+      "updatedAt": "2025-05-12T03:56:11.446Z",
+      "relatedFiles": [
+        {
+          "path": "src/mcp_shell_server/shell_executor.py",
+          "type": "TO_MODIFY",
+          "description": "在此文件中添加 _do_execute 方法"
+        }
+      ],
+      "implementationGuide": "1. 创建 _do_execute 方法，参数与 execute 方法相同（除了 return_model 参数）：\n```python\nasync def _do_execute(\n    self,\n    command: List[str],\n    directory: str,\n    stdin: Optional[str] = None,\n    timeout: Optional[int] = None,\n    envs: Optional[Dict[str, str]] = None,\n    encoding: Optional[str] = None,\n) -> ShellExecutionResult:\n```\n\n2. 将 execute 方法中的核心执行逻辑复制到 _do_execute 方法中\n\n3. 修改错误处理逻辑，将返回错误字典的部分改为抛出相应异常：\n   - 目录验证错误抛出 DirectoryError\n   - 命令验证错误抛出 CommandValidationError\n   - 超时错误抛出 CommandTimeoutError\n   - IO 重定向错误抛出 IORedirectionError\n   - 管道执行错误抛出 PipelineError\n   - 其他执行错误抛出 CommandExecutionError\n\n4. 最后返回 ShellExecutionResult 模型而不是字典\n\n5. 确保所有异常都包含必要的上下文信息",
+      "verificationCriteria": "1. _do_execute 方法的签名与 execute 方法相同（除 return_model 参数外）\n2. 所有原有功能都得到保留\n3. 错误处理逻辑改为抛出异常而不是返回错误字典\n4. 方法返回 ShellExecutionResult 模型实例\n5. 此时代码可能无法运行（因为 execute 方法尚未更新），但应该能够成功编译",
+      "analysisResult": "## 详细分析\n\n### 1. 当前代码状态分析\n\n经过对 `shell_executor.py` 的详细分析，发现当前的 `execute` 方法存在以下问题：\n\n1. **方法过长且职责混杂**：该方法包含参数验证、命令预处理、执行和错误处理等多种职责。\n2. **直接返回字典格式**：没有使用结构化的模型来表示返回值，缺乏类型安全性。\n3. **错误处理机制分散**：异常处理和错误响应格式化逻辑与核心业务逻辑混合。\n\n当前返回字典的字段包括：\n- `error`：错误信息，成功时为 None\n- `status`：命令执行状态码\n- `stdout`：标准输出内容\n- `stderr`：标准错误输出\n- `execution_time`：执行时间\n- `returncode`：进程返回码（某些情况下存在）\n- `directory`：执行目录（某些情况下存在）\n\n我们将采用渐进式开发策略，按照以下顺序进行重构，每一步完成后运行测试验证功能：\n\n1. 创建 Pydantic 模型和异常类\n2. 创建 _do_execute 方法\n3. 重构 execute 方法\n4. 更新相关的辅助方法\n\n保持向后兼容性至关重要，我们将通过默认返回字典格式并提供选项参数来确保现有客户端代码不受影响。"
+    },
+    {
+      "id": "92efcc86-aef4-40cd-b4ad-da77e884bb56",
+      "name": "重构 execute 方法",
+      "description": "重构 execute 方法，使其调用 _do_execute 方法执行核心逻辑，并捕获异常将其转换为标准响应格式。添加 return_model 参数，使方法可以返回 Pydantic 模型或向后兼容的字典。确保默认行为与重构前保持一致，不破坏现有客户端代码。",
+      "status": "待處理",
+      "dependencies": [
+        {
+          "taskId": "adfc3493-cb15-4266-b3c1-63fff3b0212b"
+        }
+      ],
+      "createdAt": "2025-05-12T03:56:11.446Z",
+      "updatedAt": "2025-05-12T03:56:11.446Z",
+      "relatedFiles": [
+        {
+          "path": "src/mcp_shell_server/shell_executor.py",
+          "type": "TO_MODIFY",
+          "description": "重构 execute 方法"
+        }
+      ],
+      "implementationGuide": "1. 修改 execute 方法签名，添加 return_model 参数：\n```python\nasync def execute(\n    self,\n    command: List[str],\n    directory: str,\n    stdin: Optional[str] = None,\n    timeout: Optional[int] = None,\n    envs: Optional[Dict[str, str]] = None,\n    encoding: Optional[str] = None,\n    return_model: bool = False,\n) -> Union[Dict[str, Any], ShellExecutionResult]:\n```\n\n2. 实现新的 execute 方法，主要逻辑如下：\n```python\nstart_time = time.time()\nprocess = None  # 初始化 process 变量\n\ntry:\n    result = await self._do_execute(command, directory, stdin, timeout, envs, encoding)\n    result.execution_time = time.time() - start_time\n    return result if return_model else result.model_dump()\nexcept ShellExecutionError as e:\n    result = ShellExecutionResult(\n        error=e.message,\n        status=e.status,\n        stdout=\"\",\n        stderr=e.message,\n        execution_time=time.time() - start_time\n    )\n    return result if return_model else result.model_dump()\nexcept Exception as e:\n    result = ShellExecutionResult(\n        error=str(e),\n        status=1,\n        stdout=\"\",\n        stderr=str(e),\n        execution_time=time.time() - start_time\n    )\n    return result if return_model else result.model_dump()\nfinally:\n    if process and process.returncode is None:\n        process.kill()\n        await process.wait()\n```\n\n3. 确保 execute 方法默认返回字典格式（当 return_model=False 时），保持向后兼容性\n4. 在方法文档中清楚说明 return_model 参数的作用",
+      "verificationCriteria": "1. execute 方法能够成功调用 _do_execute 方法并处理异常\n2. 返回值格式与重构前保持一致（默认情况下）\n3. return_model=True 时返回 ShellExecutionResult 模型实例\n4. 异常处理完善，所有类型的错误都能正确处理\n5. 所有现有测试用例通过",
+      "analysisResult": "## 详细分析\n\n### 1. 当前代码状态分析\n\n经过对 `shell_executor.py` 的详细分析，发现当前的 `execute` 方法存在以下问题：\n\n1. **方法过长且职责混杂**：该方法包含参数验证、命令预处理、执行和错误处理等多种职责。\n2. **直接返回字典格式**：没有使用结构化的模型来表示返回值，缺乏类型安全性。\n3. **错误处理机制分散**：异常处理和错误响应格式化逻辑与核心业务逻辑混合。\n\n当前返回字典的字段包括：\n- `error`：错误信息，成功时为 None\n- `status`：命令执行状态码\n- `stdout`：标准输出内容\n- `stderr`：标准错误输出\n- `execution_time`：执行时间\n- `returncode`：进程返回码（某些情况下存在）\n- `directory`：执行目录（某些情况下存在）\n\n我们将采用渐进式开发策略，按照以下顺序进行重构，每一步完成后运行测试验证功能：\n\n1. 创建 Pydantic 模型和异常类\n2. 创建 _do_execute 方法\n3. 重构 execute 方法\n4. 更新相关的辅助方法\n\n保持向后兼容性至关重要，我们将通过默认返回字典格式并提供选项参数来确保现有客户端代码不受影响。"
+    },
+    {
+      "id": "a16d9c78-48b6-4386-b6e1-f7b0d15fc63f",
+      "name": "重构 _execute_pipeline 方法",
+      "description": "按照与 execute 方法类似的模式重构 _execute_pipeline 方法，使其使用新的异常处理机制和 Pydantic 模型。确保管道执行功能正常，与新的异常处理机制兼容。",
+      "status": "待處理",
+      "dependencies": [
+        {
+          "taskId": "8fd01c72-b892-4784-ad15-755a929187a5"
+        },
+        {
+          "taskId": "2fad9837-3766-4dde-afc3-51436c318445"
+        },
+        {
+          "taskId": "92efcc86-aef4-40cd-b4ad-da77e884bb56"
+        }
+      ],
+      "createdAt": "2025-05-12T03:56:11.446Z",
+      "updatedAt": "2025-05-12T03:56:11.446Z",
+      "relatedFiles": [
+        {
+          "path": "src/mcp_shell_server/shell_executor.py",
+          "type": "TO_MODIFY",
+          "description": "重构 _execute_pipeline 方法"
+        }
+      ],
+      "implementationGuide": "1. 按照与 _do_execute 方法类似的模式，修改 _execute_pipeline 方法，使其遇到错误时抛出相应的自定义异常而不是返回错误字典\n\n2. 确保 _execute_pipeline 方法也返回 ShellExecutionResult 模型\n\n3. 需要处理的异常情况包括：\n   - 空命令错误 -> 抛出 PipelineError\n   - 命令验证错误 -> 抛出 CommandValidationError\n   - 执行错误 -> 抛出 CommandExecutionError\n\n4. 确保保留原有的所有功能，包括管道处理和进程清理\n\n5. 注意对 `current_input` 和 `final_returncode` 等状态的正确处理",
+      "verificationCriteria": "1. _execute_pipeline 方法能够正确抛出异常而不是返回错误字典\n2. 返回类型为 ShellExecutionResult 模型\n3. 所有管道执行功能正常工作\n4. 所有相关测试用例通过",
+      "analysisResult": "## 详细分析\n\n### 1. 当前代码状态分析\n\n经过对 `shell_executor.py` 的详细分析，发现当前的 `execute` 方法存在以下问题：\n\n1. **方法过长且职责混杂**：该方法包含参数验证、命令预处理、执行和错误处理等多种职责。\n2. **直接返回字典格式**：没有使用结构化的模型来表示返回值，缺乏类型安全性。\n3. **错误处理机制分散**：异常处理和错误响应格式化逻辑与核心业务逻辑混合。\n\n当前返回字典的字段包括：\n- `error`：错误信息，成功时为 None\n- `status`：命令执行状态码\n- `stdout`：标准输出内容\n- `stderr`：标准错误输出\n- `execution_time`：执行时间\n- `returncode`：进程返回码（某些情况下存在）\n- `directory`：执行目录（某些情况下存在）\n\n我们将采用渐进式开发策略，按照以下顺序进行重构，每一步完成后运行测试验证功能：\n\n1. 创建 Pydantic 模型和异常类\n2. 创建 _do_execute 方法\n3. 重构 execute 方法\n4. 更新相关的辅助方法\n\n保持向后兼容性至关重要，我们将通过默认返回字典格式并提供选项参数来确保现有客户端代码不受影响。"
+    },
+    {
+      "id": "ca619f79-90fa-4750-a1c9-eb41ef519cc0",
+      "name": "运行测试并修复问题",
+      "description": "运行现有测试用例，检查重构后的代码是否正常工作，并修复可能出现的问题。重点关注向后兼容性和异常处理的正确性。确保所有测试用例都能通过。",
+      "status": "待處理",
+      "dependencies": [
+        {
+          "taskId": "92efcc86-aef4-40cd-b4ad-da77e884bb56"
+        },
+        {
+          "taskId": "a16d9c78-48b6-4386-b6e1-f7b0d15fc63f"
+        }
+      ],
+      "createdAt": "2025-05-12T03:56:11.446Z",
+      "updatedAt": "2025-05-12T03:56:11.446Z",
+      "relatedFiles": [
+        {
+          "path": "src/mcp_shell_server/shell_executor.py",
+          "type": "TO_MODIFY",
+          "description": "可能需要修复的文件"
+        },
+        {
+          "path": "tests/",
+          "type": "REFERENCE",
+          "description": "测试目录，包含所有测试用例"
+        }
+      ],
+      "implementationGuide": "1. 使用 uv 命令运行测试：\n```bash\nuv --project E:/Programming/Github/Personal/mcp-shell-server run pytest tests/\n```\n\n2. 检查测试结果，特别关注可能的失败情况\n\n3. 常见问题及修复方法：\n   - 返回类型不兼容：确保 execute 和 _execute_pipeline 方法默认返回字典格式\n   - 字段不一致：确保 ShellExecutionResult 模型字段与原字典完全一致\n   - 异常处理不当：检查异常抛出和捕获逻辑\n   - 管道执行问题：确保管道相关功能正常工作\n\n4. 逐个修复问题，每次修复后重新运行测试\n\n5. 如果测试全部通过，进行代码清理和优化，确保代码质量和可读性",
+      "verificationCriteria": "1. 所有测试用例通过\n2. 没有引入新的警告或错误\n3. 代码能够正确处理各种边缘情况和错误情况\n4. 重构后的代码结构清晰，职责分明",
+      "analysisResult": "## 详细分析\n\n### 1. 当前代码状态分析\n\n经过对 `shell_executor.py` 的详细分析，发现当前的 `execute` 方法存在以下问题：\n\n1. **方法过长且职责混杂**：该方法包含参数验证、命令预处理、执行和错误处理等多种职责。\n2. **直接返回字典格式**：没有使用结构化的模型来表示返回值，缺乏类型安全性。\n3. **错误处理机制分散**：异常处理和错误响应格式化逻辑与核心业务逻辑混合。\n\n当前返回字典的字段包括：\n- `error`：错误信息，成功时为 None\n- `status`：命令执行状态码\n- `stdout`：标准输出内容\n- `stderr`：标准错误输出\n- `execution_time`：执行时间\n- `returncode`：进程返回码（某些情况下存在）\n- `directory`：执行目录（某些情况下存在）\n\n我们将采用渐进式开发策略，按照以下顺序进行重构，每一步完成后运行测试验证功能：\n\n1. 创建 Pydantic 模型和异常类\n2. 创建 _do_execute 方法\n3. 重构 execute 方法\n4. 更新相关的辅助方法\n\n保持向后兼容性至关重要，我们将通过默认返回字典格式并提供选项参数来确保现有客户端代码不受影响。"
+    }
+  ]
+}
