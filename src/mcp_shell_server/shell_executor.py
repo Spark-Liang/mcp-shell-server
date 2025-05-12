@@ -9,7 +9,9 @@ except ImportError:
     pwd = None # Define pwd as None if import fails
 import shlex
 import time
-from typing import IO, Any, Dict, List, Optional, Union
+from typing import IO, Any, Dict, List, Optional, Union, Iterable, Set
+
+from pydantic import BaseModel, Field
 
 from mcp_shell_server.command_preprocessor import CommandPreProcessor
 from mcp_shell_server.command_validator import CommandValidator
@@ -17,6 +19,121 @@ from mcp_shell_server.directory_manager import DirectoryManager
 from mcp_shell_server.io_redirection_handler import IORedirectionHandler
 from mcp_shell_server.process_manager import ProcessManager
 from mcp_shell_server.env_name_const import COMSPEC, SHELL, DEFAULT_ENCODING
+
+
+class ShellCommandResponse(BaseModel):
+    """Response model for shell command execution."""
+    error: Optional[str] = Field(None, description="Error message if any")
+    status: int = Field(..., description="Command exit code (0=success, non-zero=error, -1=timeout)")
+    stdout: str = Field("", description="Standard output from the command")
+    stderr: str = Field("", description="Standard error output from the command")
+    execution_time: float = Field(..., description="Time taken to execute the command in seconds")
+    directory: Optional[str] = Field(None, description="Directory where the command was executed")
+    returncode: Optional[int] = Field(None, description="Return code of the command")
+    
+    def __getitem__(self, key: str) -> Any:
+        """Support dictionary-like access."""
+        return getattr(self, key)
+    
+    def __iter__(self) -> Iterable[str]:
+        """Support iteration over keys."""
+        return iter(self.model_fields.keys())
+    
+    def __contains__(self, key: str) -> bool:
+        """Support 'in' operator."""
+        return key in self.model_fields
+    
+    def keys(self) -> Set[str]:
+        """Return all keys like a dictionary."""
+        return set(self.model_fields.keys())
+    
+    def get(self, key: str, default: Any = None) -> Any:
+        """Get a value with a default, like a dictionary."""
+        return getattr(self, key, default)
+
+
+class ShellExecutionError(Exception):
+    """Base class for shell execution errors."""
+    
+    def __init__(self, message: str, status: int = 1):
+        """
+        Initialize with error message and status code.
+        
+        Args:
+            message: Error message
+            status: Status code (default: 1, indicating error)
+        """
+        self.message = message
+        self.status = status
+        super().__init__(message)
+    
+    def to_response(self, start_time: float) -> ShellCommandResponse:
+        """
+        Convert exception to ShellCommandResponse.
+        
+        Args:
+            start_time: The time when command execution started
+            
+        Returns:
+            ShellCommandResponse object with error details
+        """
+        return ShellCommandResponse(
+            error=self.message,
+            status=self.status,
+            stdout="",
+            stderr=self.message,
+            execution_time=time.time() - start_time
+        )
+
+
+class DirectoryError(ShellExecutionError):
+    """Error raised when directory validation fails."""
+    
+    def __init__(self, message: str):
+        """Initialize directory error with appropriate message."""
+        super().__init__(message, status=1)
+
+
+class CommandValidationError(ShellExecutionError):
+    """Error raised when command validation fails."""
+    
+    def __init__(self, message: str):
+        """Initialize command validation error with appropriate message."""
+        super().__init__(message, status=1)
+
+
+class EmptyCommandError(ShellExecutionError):
+    """Error raised when command is empty."""
+    
+    def __init__(self, message: str = "Empty command"):
+        """Initialize empty command error with default or custom message."""
+        super().__init__(message, status=1)
+
+
+class CommandTimeoutError(ShellExecutionError):
+    """Error raised when command execution times out."""
+    
+    def __init__(self, message: str, timeout: Optional[int] = None):
+        """
+        Initialize timeout error with timeout information.
+        
+        Args:
+            message: Error message
+            timeout: The timeout value in seconds
+        """
+        self.timeout = timeout
+        error_msg = message
+        if timeout is not None:
+            error_msg = f"Command timed out after {timeout} seconds"
+        super().__init__(error_msg, status=-1)
+
+
+class IORedirectionError(ShellExecutionError):
+    """Error raised during IO redirection setup or handling."""
+    
+    def __init__(self, message: str):
+        """Initialize IO redirection error with appropriate message."""
+        super().__init__(message, status=1)
 
 
 class ShellExecutor:
@@ -126,6 +243,209 @@ class ShellExecutor:
         # 3. 最后使用默认的 utf-8
         return "utf-8"
 
+    async def _do_execute(
+        self,
+        command: List[str],
+        directory: str,
+        stdin: Optional[str] = None,
+        timeout: Optional[int] = None,
+        envs: Optional[Dict[str, str]] = None,
+        encoding: Optional[str] = None,
+        start_time: float = None,
+    ) -> Dict[str, Any]:
+        """
+        Core execution logic for shell commands, with error handling through exceptions.
+        
+        Args:
+            command: Command and its arguments as a list
+            directory: Directory where the command will be executed
+            stdin: Input to be passed to the command
+            timeout: Maximum time in seconds to wait for the command to complete
+            envs: Environment variables for the command
+            encoding: Character encoding for the command output
+            start_time: Time when execution started (for calculating execution_time)
+            
+        Returns:
+            Dictionary with command execution results
+            
+        Raises:
+            DirectoryError: If directory validation fails
+            EmptyCommandError: If command is empty
+            CommandValidationError: If command validation fails
+            CommandTimeoutError: If command execution times out
+            IORedirectionError: If IO redirection setup fails
+            ShellExecutionError: For other execution errors
+        """
+        process = None
+        
+        # 如果未提供encoding，使用默认获取方法
+        if encoding is None:
+            encoding = self._get_default_encoding()
+            
+        # Validate directory if specified
+        try:
+            self._validate_directory(directory)
+        except ValueError as e:
+            raise DirectoryError(str(e))
+
+        # Process command
+        preprocessed_command = self.preprocessor.preprocess_command(command)
+        cleaned_command = self.preprocessor.clean_command(preprocessed_command)
+        if not cleaned_command:
+            raise EmptyCommandError("Empty command")
+
+        # First check for pipe operators and handle pipeline
+        if "|" in cleaned_command:
+            # Validate pipeline first using the validator
+            try:
+                self.validator.validate_pipeline(cleaned_command)
+            except ValueError as e:
+                raise CommandValidationError(str(e))
+
+            # Split commands
+            commands = self.preprocessor.split_pipe_commands(cleaned_command)
+            if not commands:
+                raise EmptyCommandError("Empty command before pipe operator")
+
+            return await self._execute_pipeline(
+                commands, directory, timeout, envs, encoding
+            )
+
+        # Then check for other shell operators
+        for token in cleaned_command:
+            try:
+                self.validator.validate_no_shell_operators(token)
+            except ValueError as e:
+                raise CommandValidationError(str(e))
+
+        # Single command execution
+        try:
+            cmd, redirects = self.preprocessor.parse_command(cleaned_command)
+        except ValueError as e:
+            raise IORedirectionError(str(e))
+
+        try:
+            self.validator.validate_command(cmd)
+        except ValueError as e:
+            raise CommandValidationError(str(e))
+
+        # Directory validation
+        if directory:
+            if not os.path.exists(directory):
+                raise DirectoryError(f"Directory does not exist: {directory}")
+            if not os.path.isdir(directory):
+                raise DirectoryError(f"Not a directory: {directory}")
+                
+        if not cleaned_command:
+            raise EmptyCommandError("Empty command")
+
+        # Initialize stdout_handle with default value
+        stdout_handle: Union[IO[Any], int] = asyncio.subprocess.PIPE
+
+        try:
+            # Process redirections
+            cmd, redirects = self.io_handler.process_redirections(cleaned_command)
+
+            # Setup handles for redirection
+            handles = await self.io_handler.setup_redirects(redirects, directory)
+
+            # Get stdin and stdout from handles if present
+            stdin_data = handles.get("stdin_data")
+            if isinstance(stdin_data, str):
+                stdin = stdin_data
+
+            # Get stdout handle if present
+            stdout_value = handles.get("stdout")
+            if isinstance(stdout_value, (IO, int)):
+                stdout_handle = stdout_value
+
+        except ValueError as e:
+            raise IORedirectionError(str(e))
+
+        # Execute the command with interactive shell
+        shell = self._get_default_shell()
+        shell_cmd = self.preprocessor.create_shell_command(cmd)
+        # Adjust shell execution command based on OS
+        if sys.platform == "win32":
+             # For cmd.exe, /c executes the command and then terminates
+             shell_cmd = f'{shell} /c "{shell_cmd}"'
+        else:
+             # For sh/bash, -i for interactive, -c for command string
+             shell_cmd = f"{shell} -i -c {shlex.quote(shell_cmd)}"
+
+        try:
+            process = await self.process_manager.create_process(
+                shell_cmd, directory, stdout_handle=stdout_handle, envs=envs
+            )
+
+            # Send input if provided
+            stdin_bytes = stdin.encode() if stdin else None
+
+            async def communicate_with_timeout():
+                try:
+                    return await process.communicate(input=stdin_bytes)
+                except Exception as e:
+                    try:
+                        await process.wait()
+                    except Exception:
+                        pass
+                    raise e
+
+            # プロセス通信実行
+            stdout, stderr = await asyncio.shield(
+                self.process_manager.execute_with_timeout(
+                    process, stdin=stdin, timeout=timeout
+                )
+            )
+
+            # ファイルハンドル処理
+            if isinstance(stdout_handle, IO):
+                try:
+                    stdout_handle.close()
+                except (IOError, OSError) as e:
+                    logging.warning(f"Error closing stdout: {e}")
+
+            # Handle case where returncode is None
+            final_returncode = (
+                0 if process.returncode is None else process.returncode
+            )
+
+            return {
+                "error": None,
+                "stdout": stdout.decode(encoding).strip() if stdout else "",
+                "stderr": stderr.decode(encoding).strip() if stderr else "",
+                "returncode": final_returncode,
+                "status": process.returncode,
+                "execution_time": time.time() - (start_time or time.time()),
+                "directory": directory,
+            }
+
+        except asyncio.TimeoutError:
+            # タイムアウト時のプロセスクリーンアップ
+            if process and process.returncode is None:
+                try:
+                    process.kill()
+                    await asyncio.shield(process.wait())
+                except ProcessLookupError:
+                    # Process already terminated
+                    pass
+
+            # ファイルハンドルクリーンアップ
+            if isinstance(stdout_handle, IO):
+                stdout_handle.close()
+
+            raise CommandTimeoutError("Command timed out", timeout)
+
+        except Exception as e:  # Exception handler for subprocess
+            if isinstance(stdout_handle, IO):
+                stdout_handle.close()
+            raise ShellExecutionError(str(e))
+        
+        finally:
+            if process and process.returncode is None:
+                process.kill()
+                await process.wait()
+
     async def execute(
         self,
         command: List[str],
@@ -134,250 +454,40 @@ class ShellExecutor:
         timeout: Optional[int] = None,
         envs: Optional[Dict[str, str]] = None,
         encoding: Optional[str] = None,
-    ) -> Dict[str, Any]:
+    ) -> ShellCommandResponse:
         start_time = time.time()
         process = None  # Initialize process variable
         
-        # 如果未提供encoding，使用默认获取方法
-        if encoding is None:
-            encoding = self._get_default_encoding()
-
         try:
-            # Validate directory if specified
-            try:
-                self._validate_directory(directory)
-            except ValueError as e:
-                return {
-                    "error": str(e),
-                    "status": 1,
-                    "stdout": "",
-                    "stderr": str(e),
-                    "execution_time": time.time() - start_time,
-                }
-
-            # Process command
-            preprocessed_command = self.preprocessor.preprocess_command(command)
-            cleaned_command = self.preprocessor.clean_command(preprocessed_command)
-            if not cleaned_command:
-                return {
-                    "error": "Empty command",
-                    "status": 1,
-                    "stdout": "",
-                    "stderr": "Empty command",
-                    "execution_time": time.time() - start_time,
-                }
-
-            # First check for pipe operators and handle pipeline
-            if "|" in cleaned_command:
-                try:
-                    # Validate pipeline first using the validator
-                    try:
-                        self.validator.validate_pipeline(cleaned_command)
-                    except ValueError as e:
-                        return {
-                            "error": str(e),
-                            "status": 1,
-                            "stdout": "",
-                            "stderr": str(e),
-                            "execution_time": time.time() - start_time,
-                        }
-
-                    # Split commands
-                    commands = self.preprocessor.split_pipe_commands(cleaned_command)
-                    if not commands:
-                        raise ValueError("Empty command before pipe operator")
-
-                    return await self._execute_pipeline(
-                        commands, directory, timeout, envs, encoding
-                    )
-                except ValueError as e:
-                    return {
-                        "error": str(e),
-                        "status": 1,
-                        "stdout": "",
-                        "stderr": str(e),
-                        "execution_time": time.time() - start_time,
-                    }
-
-            # Then check for other shell operators
-            for token in cleaned_command:
-                try:
-                    self.validator.validate_no_shell_operators(token)
-                except ValueError as e:
-                    return {
-                        "error": str(e),
-                        "status": 1,
-                        "stdout": "",
-                        "stderr": str(e),
-                        "execution_time": time.time() - start_time,
-                    }
-
-            # Single command execution
-            try:
-                cmd, redirects = self.preprocessor.parse_command(cleaned_command)
-            except ValueError as e:
-                return {
-                    "error": str(e),
-                    "status": 1,
-                    "stdout": "",
-                    "stderr": str(e),
-                    "execution_time": time.time() - start_time,
-                }
-
-            try:
-                self.validator.validate_command(cmd)
-            except ValueError as e:
-                return {
-                    "error": str(e),
-                    "status": 1,
-                    "stdout": "",
-                    "stderr": str(e),
-                    "execution_time": time.time() - start_time,
-                }
-
-            # Directory validation
-            if directory:
-                if not os.path.exists(directory):
-                    return {
-                        "error": f"Directory does not exist: {directory}",
-                        "status": 1,
-                        "stdout": "",
-                        "stderr": f"Directory does not exist: {directory}",
-                        "execution_time": time.time() - start_time,
-                    }
-                if not os.path.isdir(directory):
-                    return {
-                        "error": f"Not a directory: {directory}",
-                        "status": 1,
-                        "stdout": "",
-                        "stderr": f"Not a directory: {directory}",
-                        "execution_time": time.time() - start_time,
-                    }
-            if not cleaned_command:
-                raise ValueError("Empty command")
-
-            # Initialize stdout_handle with default value
-            stdout_handle: Union[IO[Any], int] = asyncio.subprocess.PIPE
-
-            try:
-                # Process redirections
-                cmd, redirects = self.io_handler.process_redirections(cleaned_command)
-
-                # Setup handles for redirection
-                handles = await self.io_handler.setup_redirects(redirects, directory)
-
-                # Get stdin and stdout from handles if present
-                stdin_data = handles.get("stdin_data")
-                if isinstance(stdin_data, str):
-                    stdin = stdin_data
-
-                # Get stdout handle if present
-                stdout_value = handles.get("stdout")
-                if isinstance(stdout_value, (IO, int)):
-                    stdout_handle = stdout_value
-
-            except ValueError as e:
-                return {
-                    "error": str(e),
-                    "status": 1,
-                    "stdout": "",
-                    "stderr": str(e),
-                    "execution_time": time.time() - start_time,
-                }
-
-            # Execute the command with interactive shell
-            shell = self._get_default_shell()
-            shell_cmd = self.preprocessor.create_shell_command(cmd)
-            # Adjust shell execution command based on OS
-            if sys.platform == "win32":
-                 # For cmd.exe, /c executes the command and then terminates
-                 shell_cmd = f'{shell} /c "{shell_cmd}"'
-            else:
-                 # For sh/bash, -i for interactive, -c for command string
-                 shell_cmd = f"{shell} -i -c {shlex.quote(shell_cmd)}"
-
-            process = await self.process_manager.create_process(
-                shell_cmd, directory, stdout_handle=stdout_handle, envs=envs
+            # 调用_do_execute方法执行核心逻辑
+            result_dict = await self._do_execute(
+                command, directory, stdin, timeout, envs, encoding, start_time
             )
-
-            try:
-                # Send input if provided
-                stdin_bytes = stdin.encode() if stdin else None
-
-                async def communicate_with_timeout():
-                    try:
-                        return await process.communicate(input=stdin_bytes)
-                    except Exception as e:
-                        try:
-                            await process.wait()
-                        except Exception:
-                            pass
-                        raise e
-
-                try:
-                    # プロセス通信実行
-                    stdout, stderr = await asyncio.shield(
-                        self.process_manager.execute_with_timeout(
-                            process, stdin=stdin, timeout=timeout
-                        )
-                    )
-
-                    # ファイルハンドル処理
-                    if isinstance(stdout_handle, IO):
-                        try:
-                            stdout_handle.close()
-                        except (IOError, OSError) as e:
-                            logging.warning(f"Error closing stdout: {e}")
-
-                    # Handle case where returncode is None
-                    final_returncode = (
-                        0 if process.returncode is None else process.returncode
-                    )
-
-                    return {
-                        "error": None,
-                        "stdout": stdout.decode(encoding).strip() if stdout else "",
-                        "stderr": stderr.decode(encoding).strip() if stderr else "",
-                        "returncode": final_returncode,
-                        "status": process.returncode,
-                        "execution_time": time.time() - start_time,
-                        "directory": directory,
-                    }
-
-                except asyncio.TimeoutError:
-                    # タイムアウト時のプロセスクリーンアップ
-                    if process and process.returncode is None:
-                        try:
-                            process.kill()
-                            await asyncio.shield(process.wait())
-                        except ProcessLookupError:
-                            # Process already terminated
-                            pass
-
-                    # ファイルハンドルクリーンアップ
-                    if isinstance(stdout_handle, IO):
-                        stdout_handle.close()
-
-                    return {
-                        "error": f"Command timed out after {timeout} seconds",
-                        "status": -1,
-                        "stdout": "",
-                        "stderr": f"Command timed out after {timeout} seconds",
-                        "execution_time": time.time() - start_time,
-                    }
-
-            except Exception as e:  # Exception handler for subprocess
-                if isinstance(stdout_handle, IO):
-                    stdout_handle.close()
-                return {
-                    "error": str(e),
-                    "status": 1,
-                    "stdout": "",
-                    "stderr": str(e),
-                    "execution_time": time.time() - start_time,
-                }
-
+            return ShellCommandResponse.model_validate(result_dict)
+        except ShellExecutionError as e:
+            # 处理自定义异常
+            return e.to_response(start_time)
+        except asyncio.TimeoutError:
+            # 处理异步超时
+            error_msg = f"Command timed out after {timeout} seconds"
+            return ShellCommandResponse(
+                error=error_msg,
+                status=-1,
+                stdout="",
+                stderr=error_msg,
+                execution_time=time.time() - start_time,
+            )
+        except Exception as e:
+            # 处理其他未预期的异常
+            return ShellCommandResponse(
+                error=str(e),
+                status=1,
+                stdout="",
+                stderr=str(e),
+                execution_time=time.time() - start_time,
+            )
         finally:
+            # 确保进程被清理
             if process and process.returncode is None:
                 process.kill()
                 await process.wait()
@@ -402,22 +512,10 @@ class ShellExecutor:
         try:
             for cmd in commands:
                 if not cmd:
-                    return {
-                        "error": "Empty command in pipeline",
-                        "status": 1,
-                        "stdout": "",
-                        "stderr": "Empty command in pipeline",
-                        "execution_time": time.time() - start_time,
-                    }
+                    raise EmptyCommandError("Empty command in pipeline")
                 self._validate_command(cmd)
         except ValueError as e:
-            return {
-                "error": str(e),
-                "status": 1,
-                "stdout": "",
-                "stderr": str(e),
-                "execution_time": time.time() - start_time,
-            }
+            raise CommandValidationError(str(e))
 
         # Process each command in the pipeline
         for i, cmd in enumerate(commands):
@@ -453,19 +551,9 @@ class ShellExecutor:
                         "execution_time": time.time() - start_time,
                     }
             except Exception as e:
-                return {
-                    "error": str(e),
-                    "status": 1,
-                    "stdout": current_input if current_input else "",
-                    "stderr": str(e),
-                    "execution_time": time.time() - start_time,
-                }
+                raise ShellExecutionError(
+                    str(e) if not isinstance(e, ShellExecutionError) else e.message
+                )
 
-        # Fallback return in case something went wrong or the pipeline was empty
-        return {
-            "error": "Pipeline executed but produced no output",
-            "status": 1,
-            "stdout": current_input if current_input else "",
-            "stderr": "Pipeline executed but produced no output",
-            "execution_time": time.time() - start_time,
-        }
+        # Fallback - should not normally reach here
+        raise ShellExecutionError("Pipeline executed but produced no output")
