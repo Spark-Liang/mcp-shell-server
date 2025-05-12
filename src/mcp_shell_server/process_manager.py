@@ -4,11 +4,13 @@ import asyncio
 import logging
 import os
 import signal
-from typing import IO, Any, Dict, List, Optional, Set, Tuple, Union
+from typing import IO, Any, Dict, List, Optional, Set, Tuple, Union, AsyncGenerator
 from weakref import WeakSet
 
+from mcp_shell_server.interfaces import IProcessManager
 
-class ProcessManager:
+
+class ProcessManager(IProcessManager):
     """Manages process creation, execution, and cleanup for shell commands."""
 
     def __init__(self):
@@ -127,7 +129,10 @@ class ProcessManager:
         stdin: Optional[str] = None,
         stdout_handle: Any = asyncio.subprocess.PIPE,
         envs: Optional[Dict[str, str]] = None,
+        encoding: Optional[str] = None,
         timeout: Optional[int] = None,
+        description: Optional[str] = "Default process description",
+        labels: Optional[List[str]] = None,
     ) -> asyncio.subprocess.Process:
         """Create a new subprocess with the given parameters.
 
@@ -137,7 +142,10 @@ class ProcessManager:
             stdin (Optional[str]): Input to be passed to the process
             stdout_handle: File handle or PIPE for stdout
             envs (Optional[Dict[str, str]]): Additional environment variables
+            encoding (Optional[str]): Input output encoding
             timeout (Optional[int]): Timeout in seconds
+            description (Optional[str]): Process description (not used in this implementation)
+            labels (Optional[List[str]]): Process labels (not used in this implementation)
 
         Returns:
             asyncio.subprocess.Process: Created process
@@ -312,3 +320,123 @@ class ProcessManager:
 
         finally:
             await self.cleanup_processes(processes)
+
+    async def list_processes(self, labels: Optional[List[str]] = None, status: Optional[str] = None) -> List[Dict[str, Any]]:
+        """列出进程，可按标签和状态过滤。
+        
+        这个基本实现不支持标签和状态过滤，仅返回活跃进程的基本信息。
+        
+        Args:
+            labels: 标签过滤条件（未实现）
+            status: 状态过滤条件（未实现）
+            
+        Returns:
+            List[Dict]: 进程信息列表
+        """
+        result = []
+        for process in self._processes:
+            if process.returncode is None:  # 只返回活跃进程
+                result.append({
+                    "pid": process.pid,
+                    "returncode": process.returncode,
+                    "running": True
+                })
+        return result
+    
+    async def get_process(self, process_id: str) -> Optional[asyncio.subprocess.Process]:
+        """获取指定ID的进程对象。
+        
+        这个基本实现不支持按ID获取进程。
+        
+        Args:
+            process_id: 进程ID
+            
+        Returns:
+            Optional[asyncio.subprocess.Process]: 进程对象，如果不存在则返回None
+        """
+        return None
+        
+    async def stop_process(self, process_id: str, force: bool = False) -> bool:
+        """停止指定的进程。
+        
+        这个基本实现不支持按ID停止进程。
+        
+        Args:
+            process_id: 进程ID
+            force: 是否强制停止
+            
+        Returns:
+            bool: 是否成功停止
+        """
+        return False
+    
+    async def get_process_output(
+        self,
+        process_id: str,
+        tail: Optional[int] = None,
+        since_time: Optional[str] = None,
+        until_time: Optional[str] = None,
+        error: bool = False,
+    ) -> List[Dict[str, Any]]:
+        """获取进程的输出。
+        
+        这个基本实现不支持获取进程输出。
+        
+        Args:
+            process_id: 进程ID
+            tail: 只显示最后N行
+            since_time: 只显示某个时间点之后的日志
+            until_time: 只显示某个时间点之前的日志
+            error: 是否获取错误输出
+            
+        Returns:
+            List[Dict[str, Any]]: 输出行列表
+        """
+        return []
+    
+    async def get_all_output(
+        self,
+        process_id: str,
+        tail: Optional[int] = None,
+        since_time: Optional[str] = None,
+        until_time: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """获取进程的所有输出（标准输出和错误输出合并）
+        
+        这个基本实现不支持获取进程输出。
+        
+        Args:
+            process_id: 进程ID
+            tail: 只返回最后N行，如果为None则返回所有行
+            since_time: ISO格式的时间字符串，只返回该时间之后的日志
+            until_time: ISO格式的时间字符串，只返回该时间之前的日志
+            
+        Returns:
+            包含时间戳、文本和流类型的字典列表
+        """
+        return []
+    
+    async def follow_process_output(
+        self,
+        process_id: str,
+        tail: Optional[int] = None,
+        since_time: Optional[str] = None,
+        error: bool = False,
+        poll_interval: float = 0.5
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        """以流式方式获取进程输出，适用于实时监控日志
+        
+        这个基本实现不支持流式获取进程输出。
+        
+        Args:
+            process_id: 进程ID
+            tail: 初始时获取最后N行，如果为None则获取所有行
+            since_time: ISO格式的时间字符串，只返回该时间之后的日志
+            error: 是否获取错误输出
+            poll_interval: 轮询间隔，单位秒
+            
+        Yields:
+            包含时间戳和文本的字典
+        """
+        yield {"timestamp": "", "text": "", "stream": "stdout"}
+        return

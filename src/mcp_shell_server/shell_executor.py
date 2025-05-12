@@ -18,6 +18,7 @@ from mcp_shell_server.command_validator import CommandValidator
 from mcp_shell_server.directory_manager import DirectoryManager
 from mcp_shell_server.io_redirection_handler import IORedirectionHandler
 from mcp_shell_server.process_manager import ProcessManager
+from mcp_shell_server.interfaces import IProcessManager
 from mcp_shell_server.env_name_const import COMSPEC, SHELL, DEFAULT_ENCODING
 
 
@@ -141,11 +142,11 @@ class ShellExecutor:
     Executes shell commands in a secure manner by validating against a whitelist.
     """
 
-    def __init__(self, process_manager: Optional[ProcessManager] = None):
+    def __init__(self, process_manager: Optional[IProcessManager] = None):
         """
         Initialize the executor with a command validator, directory manager and IO handler.
         Args:
-            process_manager: Optional ProcessManager instance for testing
+            process_manager: Optional IProcessManager instance for testing
         """
         self.validator = CommandValidator()
         self.directory_manager = DirectoryManager()

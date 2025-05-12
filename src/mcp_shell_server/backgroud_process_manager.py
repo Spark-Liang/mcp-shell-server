@@ -12,20 +12,13 @@ from typing import Dict, List, Optional, Set, Any, Union, IO, Tuple, AsyncGenera
 
 from pydantic import BaseModel, Field, field_validator
 
+from mcp_shell_server.interfaces import IProcessManager, ProcessStatus
 from mcp_shell_server.output_manager import OutputManager
 from mcp_shell_server.env_name_const import PROCESS_RETENTION_SECONDS
 
 logger = logging.getLogger("mcp-shell-server")
 
-# 进程状态枚举
-class ProcessStatus(str, Enum):
-    """进程状态枚举"""
-    RUNNING = "running"
-    COMPLETED = "completed"
-    FAILED = "failed"
-    TERMINATED = "terminated"
-    ERROR = "error"
-
+# 进程状态枚举（使用接口中的ProcessStatus）
 
 class BackgroundProcess:
     """表示一个后台运行的进程"""
@@ -348,7 +341,7 @@ class BackgroundProcess:
             logger.warning(f"清理日志目录时出错: {e}")
 
 
-class BackgroundProcessManager:
+class BackgroundProcessManager(IProcessManager):
     """管理后台进程的创建、执行和清理。"""
 
     def __init__(self):

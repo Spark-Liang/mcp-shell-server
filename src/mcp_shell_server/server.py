@@ -11,7 +11,7 @@ from mcp.server import Server
 from mcp.types import TextContent, Tool, ImageContent, EmbeddedResource
 
 from .version import __version__
-from .tool_handler import ToolHandler
+from .interfaces import ToolHandler
 from .exec_tool_handler import ExecuteToolHandler
 from .bg_tool_handlers import bg_tool_handlers, background_process_manager
 from . import backgroud_process_manager_web as web_server

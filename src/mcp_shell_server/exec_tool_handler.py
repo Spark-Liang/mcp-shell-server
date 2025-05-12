@@ -8,7 +8,7 @@ from typing import List, Optional, Sequence, Type
 from pydantic import BaseModel, Field
 from mcp.types import TextContent
 
-from .tool_handler import ToolHandler
+from .interfaces import ToolHandler
 from .shell_executor import ShellExecutor
 
 # 配置日志

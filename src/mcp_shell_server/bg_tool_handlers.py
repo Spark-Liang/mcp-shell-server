@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional, Sequence, Type, Union
 from mcp.types import TextContent
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from .tool_handler import ToolHandler
+from .interfaces import ToolHandler
 from .backgroud_process_manager import (
     BackgroundProcessManager,
     ProcessStatus,
