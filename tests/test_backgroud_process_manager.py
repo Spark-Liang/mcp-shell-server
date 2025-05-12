@@ -53,7 +53,7 @@ async def test_create_process(bg_process_manager, cleanup_bg_processes):
         # 创建一个后台进程
         temp_dir = tempfile.gettempdir()
         bg_process = await bg_process_manager.create_process(
-            command="echo test",
+            shell_cmd="echo test",
             directory=temp_dir,
             description="Test background process",
             labels=["test"],
@@ -94,7 +94,7 @@ async def test_start_process(bg_process_manager, cleanup_bg_processes):
     
     with patch.object(bg_process_manager, "create_process", create_process_mock):
         process_id = await bg_process_manager.start_process(
-            command="echo test",
+            shell_cmd="echo test",
             directory=temp_dir,
             description="Test process",
             labels=["test", "example"],
@@ -105,7 +105,7 @@ async def test_start_process(bg_process_manager, cleanup_bg_processes):
         
         # 验证create_process被正确调用
         create_process_mock.assert_awaited_once_with(
-            command="echo test",
+            shell_cmd="echo test",
             directory=temp_dir,
             description="Test process",
             labels=["test", "example"],
@@ -462,7 +462,7 @@ async def test_process_timeout(bg_process_manager, cleanup_bg_processes):
     ) as add_error_mock:
         # 创建一个有超时设置的后台进程
         proc_id = await bg_process_manager.start_process(
-            command="sleep 10",  # 不会实际执行
+            shell_cmd="sleep 10",  # 不会实际执行
             directory=tempfile.gettempdir(),
             description="超时测试进程",
             timeout=1  # 1秒超时
@@ -545,7 +545,7 @@ async def test_execute_pipeline(bg_process_manager, cleanup_bg_processes):
         # 验证start_process被正确调用
         mock_start_process.assert_called_once()
         call_args = mock_start_process.call_args[1]
-        assert call_args["command"] == expected_pipeline
+        assert call_args["shell_cmd"] == expected_pipeline
         assert call_args["directory"] == temp_dir
         assert call_args["description"] == "测试管道命令"
         assert call_args["labels"] == ["test", "pipeline"]
@@ -622,7 +622,7 @@ async def test_auto_cleanup_processes():
             # 手动创建已完成的进程对象
             process1 = BackgroundProcess(
                 process_id="test1",
-                command="echo test1",
+                shell_cmd="echo test1",
                 directory=temp_dir,
                 description="Test process 1"
             )
@@ -631,7 +631,7 @@ async def test_auto_cleanup_processes():
             
             process2 = BackgroundProcess(
                 process_id="test2",
-                command="echo test2",
+                shell_cmd="echo test2",
                 directory=temp_dir,
                 description="Test process 2"
             )
@@ -641,7 +641,7 @@ async def test_auto_cleanup_processes():
             # 模拟一个仍在运行的进程
             process3 = BackgroundProcess(
                 process_id="test3",
-                command="echo test3",
+                shell_cmd="echo test3",
                 directory=temp_dir,
                 description="Test process 3"
             )
