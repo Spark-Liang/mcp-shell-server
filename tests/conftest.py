@@ -11,6 +11,17 @@ import pytest_asyncio
 
 from mcp_shell_server.shell_executor import ShellExecutor
 
+# 配置pytest-asyncio
+pytest_plugins = ["pytest_asyncio"]
+
+@pytest.fixture(scope="session")
+def event_loop():
+    """创建一个事件循环，这样pytest-asyncio可以使用它"""
+    policy = asyncio.get_event_loop_policy()
+    loop = policy.new_event_loop()
+    yield loop
+    loop.close()
+
 
 @pytest.fixture
 def mock_file(mocker):

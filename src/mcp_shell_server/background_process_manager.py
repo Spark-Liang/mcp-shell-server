@@ -32,7 +32,8 @@ class BackgroundProcess:
                 labels: Optional[List[str]] = None,
                 process: Optional[asyncio.subprocess.Process] = None,
                 encoding: Optional[str] = None,
-                timeout: Optional[int] = None):  # 添加超时参数
+                timeout: Optional[int] = None,  # 添加超时参数
+                envs: Optional[Dict[str, str]] = None):  # 添加环境变量
         """初始化后台进程对象
         
         Args:
@@ -44,6 +45,7 @@ class BackgroundProcess:
             process: asyncio子进程对象
             encoding: 输出字符编码
             timeout: 超时时间(秒)
+            envs: 环境变量字典
         """
         self.process_id = process_id  # 随机字符串作为唯一标识
         self.command = shell_cmd  # 命令字符串
@@ -54,6 +56,7 @@ class BackgroundProcess:
         self.encoding = encoding or 'utf-8'  # 字符编码，默认utf-8
         self.start_time = datetime.now()  # 启动时间
         self.timeout = timeout  # 超时时间(秒)
+        self.envs = envs  # 环境变量
         
         # 创建临时目录用于存储日志文件
         self.log_dir = os.path.join(tempfile.gettempdir(), f"mcp_shell_logs_{process_id}")
@@ -190,7 +193,26 @@ class BackgroundProcess:
             TimeoutError: 如果通信超时
         """
         if self.process:
-            return await self.process.communicate(input=input, timeout=timeout)
+            try:
+                if timeout is not None:
+                    # 使用 asyncio.wait_for 实现超时功能，不假设 process.communicate 支持 timeout
+                    # 注意这里调用 communicate 时不传递 timeout 参数
+                    try:
+                        return await asyncio.wait_for(
+                            self.process.communicate(input=input), 
+                            timeout=timeout
+                        )
+                    except asyncio.TimeoutError:
+                        raise TimeoutError("进程通信超时")
+                else:
+                    # 无超时限制的情况
+                    return await self.process.communicate(input=input)
+            except Exception as e:
+                # 如果不是超时错误，重新抛出
+                if not isinstance(e, (TimeoutError, asyncio.TimeoutError)):
+                    raise
+                # 超时错误已经在上面处理过了，这里重新抛出
+                raise
             
         # 如果内部进程不存在，尝试从日志中获取输出
         if self._stdout_logger and self._stderr_logger:
@@ -410,14 +432,51 @@ class BackgroundProcessManager(IProcessManager):
             RuntimeError: 如果进程执行出错
         """
         try:
-            # 如果进程是 BackgroundProcess 类型，尝试使用其 communicate 方法
+            # 根据process的类型选择不同的处理方式
             if isinstance(process, BackgroundProcess):
-                # 使用进程的 communicate 方法获取输出
-                return await process.communicate(input=stdin, timeout=timeout)
+                # 对于BackgroundProcess，使用特殊处理：等待进程完成后获取日志
+                
+                # 如果提供了输入，尝试写入
+                if stdin and process.process and process.process.stdin:
+                    try:
+                        process.process.stdin.write(stdin)
+                        await process.process.stdin.drain()
+                        process.process.stdin.close()
+                    except Exception as e:
+                        logger.warning(f"写入进程输入时出错: {e}")
+                
+                # 等待进程完成
+                try:
+                    if timeout is not None:
+                        await asyncio.wait_for(process.wait(), timeout=timeout)
+                    else:
+                        await process.wait()
+                except asyncio.TimeoutError:
+                    raise TimeoutError("进程执行超时")
+                
+                # 从日志获取输出
+                stdout_logs = process.get_output()
+                stderr_logs = process.get_error()
+                
+                # 将日志转换为字节字符串
+                stdout_bytes = "\n".join([log.text for log in stdout_logs]).encode(process.encoding)
+                stderr_bytes = "\n".join([log.text for log in stderr_logs]).encode(process.encoding)
+                
+                return stdout_bytes, stderr_bytes
             else:
-                # 使用 asyncio.subprocess.Process 的 communicate 方法
-                return await process.communicate(input=stdin, timeout=timeout)
-        except asyncio.TimeoutError as e:
+                # 对于普通的asyncio.subprocess.Process，使用标准方法
+                if timeout is not None:
+                    try:
+                        return await asyncio.wait_for(
+                            process.communicate(input=stdin), 
+                            timeout=timeout
+                        )
+                    except asyncio.TimeoutError:
+                        raise TimeoutError("进程执行超时")
+                else:
+                    return await process.communicate(input=stdin)
+                    
+        except (asyncio.TimeoutError, TimeoutError) as e:
             # 超时时，尝试终止进程
             try:
                 process.terminate()
@@ -712,6 +771,7 @@ class BackgroundProcessManager(IProcessManager):
                 process=process,
                 encoding=encoding,
                 timeout=timeout,  # 传递超时参数
+                envs=envs,  # 传递环境变量
             )
             
             # 将进程添加到管理的字典中
@@ -1094,14 +1154,45 @@ class BackgroundProcessManager(IProcessManager):
         if processes is not None:
             count = 0
             for proc in processes:
-                if proc.returncode is None:
-                    # 进程仍在运行，尝试终止
-                    proc.kill()
+                if isinstance(proc, BackgroundProcess):
+                    # 对于 BackgroundProcess 对象，我们需要找到它在 self._processes 中的 ID
                     try:
-                        await proc.wait()
+                        # 检查进程是否正在运行
+                        if proc.is_running():
+                            proc_id = proc.process_id if hasattr(proc, 'process_id') else None
+                            if proc_id and proc_id in self._processes:
+                                # 使用已有的方法停止进程
+                                await self.stop_process(proc_id, force=True)
+                                count += 1
+                            else:
+                                # 直接终止进程
+                                proc.kill()
+                                try:
+                                    await proc.wait()
+                                except Exception as e:
+                                    logger.warning(f"等待 BackgroundProcess 终止时出错: {e}")
+                                count += 1
+                    except ProcessLookupError:
+                        # 进程可能已经不存在
+                        logger.warning("尝试清理不存在的进程")
                     except Exception as e:
-                        logger.warning(f"等待进程终止时出错: {e}")
-                    count += 1
+                        logger.error(f"清理 BackgroundProcess 时出错: {e}")
+                else:
+                    # 对于普通的 asyncio.subprocess.Process 对象
+                    try:
+                        if proc.returncode is None:
+                            # 进程仍在运行，尝试终止
+                            proc.kill()
+                            try:
+                                await proc.wait()
+                            except Exception as e:
+                                logger.warning(f"等待进程终止时出错: {e}")
+                            count += 1
+                    except ProcessLookupError:
+                        # 进程可能已经不存在
+                        logger.warning("尝试清理不存在的进程")
+                    except Exception as e:
+                        logger.error(f"清理进程时出错: {e}")
             return count
         
         # 按标签和状态过滤清理进程（原有行为）
@@ -1127,6 +1218,7 @@ class BackgroundProcessManager(IProcessManager):
         for proc_id in to_remove:
             await self.cleanup_process(proc_id)
             del self._processes[proc_id]
+            
             
         return len(to_remove)
 

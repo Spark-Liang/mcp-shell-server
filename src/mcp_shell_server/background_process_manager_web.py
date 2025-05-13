@@ -6,7 +6,7 @@ import asyncio
 from datetime import datetime
 from flask import Flask, render_template, request, jsonify, redirect, url_for
 
-from mcp_shell_server.backgroud_process_manager import BackgroundProcessManager
+from mcp_shell_server.background_process_manager import BackgroundProcessManager
 
 # 创建日志记录器
 logger = logging.getLogger("mcp-shell-server")

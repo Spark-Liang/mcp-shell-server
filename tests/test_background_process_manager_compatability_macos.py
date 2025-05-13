@@ -16,7 +16,7 @@ pytestmark = [
 
 @pytest.fixture
 def process_manager():
-    from mcp_shell_server.backgroud_process_manager import BackgroundProcessManager
+    from mcp_shell_server.background_process_manager import BackgroundProcessManager
 
     pm = BackgroundProcessManager()
     try:

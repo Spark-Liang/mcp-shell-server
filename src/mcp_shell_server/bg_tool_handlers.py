@@ -11,7 +11,7 @@ from mcp.types import TextContent
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from .interfaces import ToolHandler, LogEntry
-from .backgroud_process_manager import (
+from .background_process_manager import (
     BackgroundProcessManager,
     ProcessStatus,
 )

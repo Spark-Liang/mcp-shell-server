@@ -14,7 +14,7 @@ from .version import __version__
 from .interfaces import ToolHandler
 from .exec_tool_handler import ExecuteToolHandler
 from .bg_tool_handlers import bg_tool_handlers, background_process_manager
-from . import backgroud_process_manager_web as web_server
+from . import background_process_manager_web as web_server
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
