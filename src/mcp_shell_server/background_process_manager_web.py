@@ -4,12 +4,17 @@ import os
 import logging
 import asyncio
 from datetime import datetime
+from typing import Optional, List
 from flask import Flask, render_template, request, jsonify, redirect, url_for
 
 from mcp_shell_server.background_process_manager import BackgroundProcessManager
+from mcp_shell_server.interfaces import ProcessStatus
 
 # 创建日志记录器
 logger = logging.getLogger("mcp-shell-server")
+
+# 全局变量保存URL前缀
+url_prefix = ''
 
 # 创建Flask应用
 app = Flask(__name__, template_folder="templates")
@@ -23,23 +28,26 @@ process_manager = default_shell_executor.process_manager
 @app.route('/')
 def index():
     """显示进程管理首页"""
-    return render_template('process_list.html')
+    return render_template('process_list.html', url_prefix=url_prefix)
 
 @app.route('/process/<int:pid>')
 def process_detail(pid):
     """显示单个进程详细信息的页面"""
     # 根据进程ID获取进程信息，然后渲染模板
-    return render_template('process_detail.html', pid=pid)
+    return render_template('process_detail.html', pid=pid, url_prefix=url_prefix)
 
 @app.route('/api/processes')
 def list_processes():
     """获取所有进程信息"""
     # 从查询参数获取过滤条件
     labels = request.args.get('labels')
-    status = request.args.get('status')
+    status_str = request.args.get('status')
     
     # 转换标签为列表
     labels_list = labels.split(',') if labels else None
+    
+    # 转换状态字符串为枚举值
+    status = ProcessStatus(status_str) if status_str else None
     
     # 创建事件循环
     loop = asyncio.new_event_loop()
@@ -52,8 +60,9 @@ def list_processes():
             status=status
         ))
         
-        return jsonify([proc.to_dict() for proc in processes])
+        return jsonify([proc.model_dump() for proc in processes])
     except Exception as e:
+        logger.exception(f"获取进程列表失败: {str(e)}")
         return jsonify({"error": str(e)}), 500
     finally:
         loop.close()
@@ -72,8 +81,9 @@ def get_process(pid):
         if not process:
             return jsonify({"error": f"Process {pid} not found"}), 404
             
-        return jsonify(process.to_dict())
+        return jsonify(process.process_info.model_dump())
     except Exception as e:
+        logger.exception(f"获取进程 {pid} 信息失败: {str(e)}")
         return jsonify({"error": str(e)}), 500
     finally:
         loop.close()
@@ -120,14 +130,15 @@ def get_process_output(pid):
                 error=True
             ))
         
-        # 转换为字典列表
+        # 转换为字典列表，使用model_dump()替代to_dict()
         result = {
-            "stdout": [entry.to_dict() for entry in stdout],
-            "stderr": [entry.to_dict() for entry in stderr]
+            "stdout": [entry.model_dump() for entry in stdout],
+            "stderr": [entry.model_dump() for entry in stderr]
         }
         
         return jsonify(result)
     except Exception as e:
+        logger.exception(f"获取进程 {pid} 输出失败: {str(e)}")
         return jsonify({"error": str(e)}), 500
     finally:
         loop.close()
@@ -170,6 +181,7 @@ def stop_process_api(pid):
         finally:
             loop.close()
     except Exception as e:
+        logger.exception(f"停止进程 {pid} 失败: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/process/<int:pid>/clean', methods=['POST'])
@@ -186,6 +198,13 @@ def clean_process_api(pid):
             if not process:
                 return jsonify({"error": f"Process {pid} not found"}), 404
                 
+            # 检查进程状态是否为运行中
+            if process.status == ProcessStatus.RUNNING:
+                return jsonify({
+                    "status": "error",
+                    "message": "Process is still running and cannot be cleaned"
+                }), 400
+                
             # 异步清理进程
             loop.run_until_complete(
                 process_manager.clean_completed_process(pid)
@@ -199,6 +218,7 @@ def clean_process_api(pid):
         finally:
             loop.close()
     except Exception as e:
+        logger.exception(f"清理进程 {pid} 失败: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/process/clean_all', methods=['POST'])
@@ -210,13 +230,15 @@ def clean_all_processes_api():
     
     try:
         # 异步清理所有进程
-        loop.run_until_complete(process_manager.cleanup_all())
+        count = loop.run_until_complete(process_manager.cleanup_all())
         
         return jsonify({
             "status": "success",
-            "message": "All completed processes cleaned successfully"
+            "message": f"Successfully cleaned {count} completed processes",
+            "count": count
         })
     except Exception as e:
+        logger.exception(f"清理所有进程失败: {str(e)}")
         return jsonify({"error": str(e)}), 500
     finally:
         loop.close()
@@ -278,6 +300,7 @@ def clean_selected_processes_api():
                 })
                 
             except Exception as e:
+                logger.exception(f"清理进程 {pid} 失败: {str(e)}")
                 results["failed"].append({
                     "pid": pid,
                     "message": str(e)
@@ -288,21 +311,34 @@ def clean_selected_processes_api():
         loop.close()
 
 # 启动函数
-def start_web_interface(host='0.0.0.0', port=5000, debug=False, url_prefix=''):
+def start_web_interface(host='0.0.0.0', port=5000, debug=False, prefix=''):
     """启动Web界面
     
     Args:
         host: 监听的主机地址
         port: 监听的端口
         debug: 是否启用调试模式
-        url_prefix: URL前缀，用于在子路径下运行应用
+        prefix: URL前缀，用于在子路径下运行应用
     """
-    if url_prefix:
-        if not url_prefix.startswith('/'):
-            url_prefix = '/' + url_prefix
-        # 创建一个具有URL前缀的应用
-        application = Flask(__name__, template_folder="templates", static_url_path=f"{url_prefix}/static")
-        # 注册路由时添加前缀
+    # 设置全局 URL 前缀，用于视图函数中传递给模板
+    global url_prefix
+    
+    # 处理前缀格式
+    if prefix and not prefix.startswith('/'):
+        prefix = '/' + prefix
+    
+    # 更新全局变量
+    url_prefix = prefix
+    
+    if prefix:
+        # 创建带有URL前缀的新应用
+        application = Flask(__name__, template_folder="templates")
+        
+        # 设置静态文件路径
+        application.static_url_path = f"{prefix}/static"
+        application.static_folder = os.path.join(os.path.dirname(__file__), 'templates/static')
+        
+        # 注册所有路由
         for rule in app.url_map.iter_rules():
             # 跳过静态文件路由
             if rule.endpoint == 'static':
@@ -310,17 +346,18 @@ def start_web_interface(host='0.0.0.0', port=5000, debug=False, url_prefix=''):
             # 添加带前缀的路由
             new_rule = url_prefix + rule.rule
             application.add_url_rule(
-                new_rule,
+                prefix + rule.rule,
                 endpoint=rule.endpoint,
                 view_func=app.view_functions[rule.endpoint],
                 methods=rule.methods,
                 defaults=rule.defaults,
                 strict_slashes=rule.strict_slashes
             )
-        # 启动应用
+        
+        # 启动前缀模式的应用
         application.run(host=host, port=port, debug=debug)
     else:
-        # 直接启动原始应用
+        # 启动原始应用
         app.run(host=host, port=port, debug=debug)
 
 if __name__ == "__main__":

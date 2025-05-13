@@ -46,7 +46,7 @@ def main():
     # 解析命令行参数
     parser = argparse.ArgumentParser(description="使用 Nuitka 构建 mcp-shell-server 可执行文件")
     parser.add_argument("--proxy", help="HTTP 代理地址 (例如 http://127.0.0.1:1080)")
-    parser.add_argument("--output-dir", default="dist/executable", help="输出目录")
+    parser.add_argument("--output-dir", default="dist/", help="输出目录")
     parser.add_argument("--debug", action="store_true", help="启用调试模式")
     parser.add_argument("--quick", action="store_true", help="快速构建模式，减少优化")
     parser.add_argument("--test", action="store_true", help="测试模式，仅输出命令不执行")
@@ -85,7 +85,7 @@ def main():
     print(f"[{time.time() - start_time:.2f}s] 输出目录: {output_dir}")
     
     # 确定入口模块路径
-    entry_module = os.path.join("src", "mcp_shell_server", "__init__.py")
+    entry_module = os.path.join("src", "mcp_shell_server", "main.py")
     if not os.path.exists(entry_module) and not args.test:
         print(f"[{time.time() - start_time:.2f}s] 错误: 入口模块不存在: {entry_module}")
         sys.exit(1)

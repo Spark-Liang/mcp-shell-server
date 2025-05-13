@@ -447,6 +447,11 @@ class ShellExecutor:
                 process.kill()
                 await process.wait()
 
+    @property
+    def allowed_commands(self) -> List[str]:
+        """Get the list of allowed commands"""
+        return self.validator.get_allowed_commands()
+
     async def execute(
         self,
         command: List[str],

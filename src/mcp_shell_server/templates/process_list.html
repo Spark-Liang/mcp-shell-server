@@ -123,6 +123,9 @@
     </div>
 
     <script>
+        // 保存URL前缀，从模板中获取
+        const urlPrefix = "{{ url_prefix }}";
+        
         // 页面加载完成后获取进程列表
         document.addEventListener('DOMContentLoaded', function() {
             loadProcesses();
@@ -140,7 +143,7 @@
         // 加载进程列表
         function loadProcesses() {
             const status = document.getElementById('status').value;
-            let url = '/api/processes';
+            let url = `${urlPrefix}/api/processes`;
             
             if (status) {
                 url += `?status=${status}`;
@@ -167,19 +170,28 @@
             }
             
             processes.forEach(process => {
-                let statusClass = 'status-' + process.status.toLowerCase();
+                // 检查进程ID，可能是pid或id属性
+                const processId = process.pid || process.id || "未知";
+                // 确保状态值存在且为小写
+                const statusValue = (process.status || "unknown").toLowerCase();
+                let statusClass = 'status-' + statusValue;
+                
+                // 获取结束时间
+                const endTimeDisplay = formatDateTime(process.end_time) || '-';
+                
                 let row = `
                     <tr>
-                        <td>${process.pid}</td>
+                        <td>${processId}</td>
                         <td>${process.command || 'N/A'}</td>
                         <td>${process.description || 'N/A'}</td>
-                        <td class="${statusClass}">${process.status}</td>
-                        <td>${formatDateTime(process.start_time)}</td>
+                        <td class="${statusClass}">${process.status || 'UNKNOWN'}</td>
+                        <td>${formatDateTime(process.start_time) || '-'}</td>
+                        <td>${endTimeDisplay}</td>
                         <td>
-                            <button class="btn btn-view" onclick="viewProcess(${process.pid})">查看</button>
-                            ${process.status === 'RUNNING' ? 
-                            `<button class="btn btn-stop" onclick="stopProcess(${process.pid})">停止</button>` :
-                            `<button class="btn btn-clean" onclick="cleanProcess(${process.pid})">清理</button>`}
+                            <button class="btn btn-view" onclick="viewProcess('${processId}')">查看</button>
+                            ${statusValue === 'running' ? 
+                            `<button class="btn btn-stop" onclick="stopProcess('${processId}')">停止</button>` :
+                            `<button class="btn btn-clean" onclick="cleanProcess('${processId}')">清理</button>`}
                         </td>
                     </tr>
                 `;
@@ -201,13 +213,13 @@
         
         // 查看进程详情
         function viewProcess(processId) {
-            window.location.href = `/process/${processId}`;
+            window.location.href = `${urlPrefix}/process/${processId}`;
         }
         
         // 停止进程
         function stopProcess(processId) {
             if (confirm('确定要停止此进程吗？')) {
-                fetch(`/api/process/${processId}/stop`, {
+                fetch(`${urlPrefix}/api/process/${processId}/stop`, {
                     method: 'POST'
                 })
                 .then(response => response.json())
@@ -225,7 +237,7 @@
         // 清理进程
         function cleanProcess(processId) {
             if (confirm('确定要清理此进程吗？此操作不可撤销。')) {
-                fetch(`/api/process/${processId}/clean`, {
+                fetch(`${urlPrefix}/api/process/${processId}/clean`, {
                     method: 'POST'
                 })
                 .then(response => response.json())

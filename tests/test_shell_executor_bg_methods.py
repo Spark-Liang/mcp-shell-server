@@ -13,6 +13,7 @@ async def test_list_processes():
     # Mock data
     mock_processes = [
         ProcessInfo(
+            pid=1,
             shell_cmd="echo hello",
             directory="/tmp",
             envs={},

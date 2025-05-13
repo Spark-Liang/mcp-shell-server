@@ -153,6 +153,7 @@ class ProcessStatus(str, Enum):
 
 class ProcessInfo(BaseModel):
     """进程信息"""
+    pid: int = Field(description="进程ID")
     shell_cmd: str = Field(description="进程命令")
     directory: str = Field(description="进程工作目录")
     envs: Optional[Dict[str, str]] = Field(description="进程环境变量")

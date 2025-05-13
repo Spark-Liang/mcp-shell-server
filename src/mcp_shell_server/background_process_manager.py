@@ -15,15 +15,13 @@ from unittest.mock import MagicMock
 
 from pydantic import BaseModel, Field, field_validator
 
-from .interfaces import LogEntry, ProcessInfo, ProcessStatus, IProcessManager, deprecated
+from .interfaces import LogEntry, ProcessInfo, ProcessStatus, IProcessManager, ExtendedProcess
 from .output_manager import OutputManager
 from .env_name_const import PROCESS_RETENTION_SECONDS
 
 logger = logging.getLogger("mcp-shell-server")
 
-# 进程状态枚举（使用接口中的ProcessStatus）
-
-class BackgroundProcess:
+class BackgroundProcess(ExtendedProcess):
     """表示一个后台运行的进程"""
     def __init__(self, 
                 shell_cmd: str, 
@@ -155,6 +153,28 @@ class BackgroundProcess:
         if self.process:
             return self.process.stderr
         return None
+
+    @property
+    def process_info(self) -> ProcessInfo:
+        """获取进程基本信息
+        
+        Returns:
+            ProcessInfo: 包含进程基本信息的字典
+        """
+        return ProcessInfo(
+            pid=self.pid,
+            shell_cmd=self.command,
+            directory=self.directory,
+            envs=self.envs,
+            timeout=self.timeout,
+            encoding=self.encoding,
+            description=self.description,
+            labels=self.labels,
+            start_time=self.start_time,
+            end_time=self.end_time,
+            status=self.status,
+            exit_code=self.exit_code
+        )
 
     def __getattr__(self, name: str) -> Any:
         """转发未定义的属性和方法到内部 process 对象，提供兼容性。
@@ -750,18 +770,18 @@ class BackgroundProcessManager(IProcessManager):
             ValueError: 如果进程创建失败
         """
         # 记录进程启动详细信息
-        logger.info(f"启动进程:")
-        logger.info(f"  命令: {shell_cmd}")
-        logger.info(f"  工作目录: {directory}")
+        logger.info(f"start process:")
+        logger.info(f"   command: {shell_cmd}")
+        logger.info(f"   working directory: {directory}")
         if envs:
-            logger.info(f"  环境变量: {envs}")
-        logger.info(f"  描述: {description}")
+            logger.info(f"   environment variables: {envs}")
+        logger.info(f"   description: {description}")
         if labels:
-            logger.info(f"  标签: {labels}")
+            logger.info(f"   labels: {labels}")
         if encoding:
-            logger.info(f"  编码: {encoding}")
+            logger.info(f"   encoding: {encoding}")
         if timeout:
-            logger.info(f"  超时: {timeout}秒")
+            logger.info(f"   timeout: {timeout} seconds")
         
         try:
             # 创建实际的子进程
@@ -886,21 +906,7 @@ class BackgroundProcessManager(IProcessManager):
             if status and bg_process.status != status:
                 continue
                 
-            # 添加进程信息到结果
-            process_info = ProcessInfo(
-                shell_cmd=bg_process.command,
-                directory=bg_process.directory,
-                envs=bg_process.envs,
-                timeout=bg_process.timeout,
-                encoding=bg_process.encoding,
-                description=bg_process.description,
-                labels=bg_process.labels,
-                start_time=bg_process.start_time,
-                end_time=bg_process.end_time,
-                status=bg_process.status,
-                exit_code=bg_process.exit_code
-            )
-            result.append(process_info)
+            result.append(bg_process.process_info)
             
         return result
     
