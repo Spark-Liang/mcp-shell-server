@@ -21,6 +21,7 @@ class MockProcess:
         self.returncode = returncode
         self.command = command
         self.stdin = None  # 定义stdin属性
+        self.pid = 12345  # 添加pid属性，默认值为12345
 
     async def communicate(self, input=None):
         """Process communicate method that supports stdin"""

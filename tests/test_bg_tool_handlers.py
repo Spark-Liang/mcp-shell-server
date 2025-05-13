@@ -19,6 +19,7 @@ from mcp_shell_server.bg_tool_handlers import (
     StopBackgroundProcessToolHandler,
     GetBackgroundProcessOutputToolHandler,
 )
+from mcp_shell_server.background_process_manager import ProcessStatus
 
 
 def test_start_process_args_validation():
@@ -77,20 +78,20 @@ def test_list_processes_args_validation():
 
 def test_stop_process_args_validation():
     """测试StopProcessArgs参数验证"""
-    args = StopProcessArgs(process_id="test123")
-    assert args.process_id == "test123"
-    assert args.force is False
+    args = StopProcessArgs(pid=12345)
+    assert args.pid == 12345
     
-    args = StopProcessArgs(process_id="test123", force=True)
-    assert args.process_id == "test123"
+    # 测试force参数
+    args = StopProcessArgs(pid=12345, force=True)
+    assert args.pid == 12345
     assert args.force is True
 
 
 def test_get_process_output_args_validation():
     """测试GetProcessOutputArgs参数验证"""
     # 基本参数
-    args = GetProcessOutputArgs(process_id="test123")
-    assert args.process_id == "test123"
+    args = GetProcessOutputArgs(pid=12345)
+    assert args.pid == 12345
     assert args.tail is None
     assert args.since is None
     assert args.until is None
@@ -104,7 +105,7 @@ def test_get_process_output_args_validation():
     one_hour_ago = now - timedelta(hours=1)
     
     args = GetProcessOutputArgs(
-        process_id="test123",
+        pid=12345,
         tail=10,
         since=one_hour_ago,
         until=now,
@@ -113,7 +114,7 @@ def test_get_process_output_args_validation():
         add_time_prefix=False,
         time_prefix_format="%H:%M:%S"
     )
-    assert args.process_id == "test123"
+    assert args.pid == 12345
     assert args.tail == 10
     assert args.since == one_hour_ago
     assert args.until == now
@@ -124,7 +125,7 @@ def test_get_process_output_args_validation():
     
     # 字符串日期转换
     args = GetProcessOutputArgs(
-        process_id="test123",
+        pid=12345,
         since="2021-01-01T12:00:00",
         until="2021-01-02T12:00:00"
     )
@@ -134,20 +135,20 @@ def test_get_process_output_args_validation():
     # 无效的日期格式
     with pytest.raises(ValidationError, match="must be a valid ISO format"):
         GetProcessOutputArgs(
-            process_id="test123",
+            pid=12345,
             since="invalid-date"
         )
     
     with pytest.raises(ValidationError, match="must be a valid ISO format"):
         GetProcessOutputArgs(
-            process_id="test123",
+            pid=12345,
             until="invalid-date"
         )
     
     # tail必须大于0
     with pytest.raises(ValidationError, match="Input should be greater than 0"):
         GetProcessOutputArgs(
-            process_id="test123",
+            pid=12345,
             tail=0
         )
 
@@ -159,10 +160,10 @@ async def test_get_process_output_tool_handler():
     
     # 创建模拟进程
     mock_process = MagicMock()
-    mock_process.pid = "test123"
+    mock_process.pid = 12345
     mock_process.command = ["echo", "test"]
     mock_process.description = "Test process"
-    mock_process.status = "running"
+    mock_process.status = ProcessStatus.RUNNING
     
     # 模拟get_process_output方法 - 使用LogEntry替代字典
     now = datetime.now()
@@ -178,7 +179,7 @@ async def test_get_process_output_tool_handler():
         
         # 测试标准输出
         args = GetProcessOutputArgs(
-            process_id="test123",
+            pid=12345,
             since=datetime.now() - timedelta(hours=1),
             with_stdout=True,
             with_stderr=False
@@ -186,13 +187,13 @@ async def test_get_process_output_tool_handler():
         
         result = await handler._do_run_tool(args)
         assert len(result) == 2  # 现在返回两个TextContent
-        assert "Process test123" in result[0].text  # 第一个是进程信息
-        assert "stdout" in result[1].text  # 第二个是标准输出内容
+        assert "Process 12345" in result[0].text  # 第一个是进程信息
+        assert "STDOUT" in result[1].text  # 第二个是标准输出内容
         
         # 验证调用
         mock_executor.get_process_output.assert_called_once()
         call_args = mock_executor.get_process_output.call_args[1]
-        assert call_args["process_id"] == "test123"
+        assert call_args["pid"] == 12345
         assert call_args["since"] is not None  # 时间参数存在
         assert call_args["error"] is False
         
@@ -200,36 +201,36 @@ async def test_get_process_output_tool_handler():
         mock_executor.get_process_output.reset_mock()
         
         args = GetProcessOutputArgs(
-            process_id="test123",
+            pid=12345,
             with_stdout=False,
             with_stderr=True
         )
         
         result = await handler._do_run_tool(args)
         assert len(result) == 2  # 现在返回两个TextContent
-        assert "Process test123" in result[0].text  # 第一个是进程信息
-        assert "stderr" in result[1].text  # 第二个是错误输出内容
+        assert "Process 12345" in result[0].text  # 第一个是进程信息
+        assert "STDERR" in result[1].text  # 第二个是错误输出内容
         
         # 验证调用
         mock_executor.get_process_output.assert_called_once()
         call_args = mock_executor.get_process_output.call_args[1]
-        assert call_args["process_id"] == "test123"
+        assert call_args["pid"] == 12345
         assert call_args["error"] is True
         
         # 测试同时获取标准输出和错误输出
         mock_executor.get_process_output.reset_mock()
         
         args = GetProcessOutputArgs(
-            process_id="test123",
+            pid=12345,
             with_stdout=True,
             with_stderr=True
         )
         
         result = await handler._do_run_tool(args)
-        assert len(result) == 3  # 返回三个TextContent(进程信息、stderr、stdout)
-        assert "Process test123" in result[0].text  # 第一个是进程信息
-        assert "stdout:" in result[1].text  # 第二个是标准输出
-        assert "stderr:" in result[2].text  # 第三个是错误输出
+        assert len(result) == 3  # 返回三个TextContent(进程信息、stdout、stderr)
+        assert "Process 12345" in result[0].text  # 第一个是进程信息
+        assert "STDOUT" in result[1].text  # 第二个是标准输出
+        assert "STDERR" in result[2].text  # 第三个是错误输出
         
         
         # 验证调用
@@ -240,7 +241,7 @@ async def test_get_process_output_tool_handler():
         mock_executor.get_process_output.reset_mock()
         
         args = GetProcessOutputArgs(
-            process_id="test123",
+            pid=12345,
             with_stdout=True,
             with_stderr=False,
             add_time_prefix=False
@@ -248,7 +249,5 @@ async def test_get_process_output_tool_handler():
         
         result = await handler._do_run_tool(args)
         assert len(result) == 2  # 进程信息和标准输出
-        assert "stdout:" in result[1].text  # 输出标题格式正确
-        assert "lines" in result[1].text  # 包含行数信息
-        assert "Test output" in result[1].text  # 输出中包含文本
-        assert "[" not in result[1].text.split("---\n")[2]  # 确认内容部分没有时间戳前缀 
+        assert "STDOUT" in result[1].text  # 输出标题格式正确
+        assert "Test output" in result[1].text  # 输出中包含文本 

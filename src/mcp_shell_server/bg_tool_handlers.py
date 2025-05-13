@@ -91,7 +91,7 @@ class StartBackgroundProcessToolHandler(ToolHandler[StartProcessArgs]):
         
         try:
             # 使用 ShellExecutor 启动后台进程
-            process_id = await default_shell_executor.async_execute(
+            pid = await default_shell_executor.async_execute(
                 command=command,
                 directory=directory,
                 description=description,
@@ -104,7 +104,7 @@ class StartBackgroundProcessToolHandler(ToolHandler[StartProcessArgs]):
             
             return [TextContent(
                 type="text",
-                text=f"Started background process with ID: {process_id}"
+                text=f"Started background process with ID: {pid}"
             )]
         except Exception as e:
             logger.error(f"Error starting background process: {e}")
@@ -192,7 +192,7 @@ class ListBackgroundProcessesToolHandler(ToolHandler[ListProcessesArgs]):
 
 class StopProcessArgs(BaseModel):
     """停止进程的参数模型"""
-    process_id: str = Field(
+    pid: int = Field(
         description="ID of the process to stop",
     )
     force: Optional[bool] = Field(
@@ -203,7 +203,7 @@ class StopProcessArgs(BaseModel):
 
 class CleanProcessArgs(BaseModel):
     """清理进程的参数模型"""
-    process_ids: List[str] = Field(
+    pids: List[int] = Field(
         description="要清理的进程ID列表",
     )
 
@@ -224,7 +224,7 @@ class StopBackgroundProcessToolHandler(ToolHandler[StopProcessArgs]):
         return StopProcessArgs
         
     async def _do_run_tool(self, arguments: StopProcessArgs) -> Sequence[TextContent]:
-        pid = arguments.process_id
+        pid = arguments.pid
         force = arguments.force
         
         try:
@@ -257,7 +257,7 @@ class StopBackgroundProcessToolHandler(ToolHandler[StopProcessArgs]):
 
 class GetProcessOutputArgs(BaseModel):
     """获取进程输出的参数模型"""
-    process_id: str = Field(
+    pid: int = Field(
         description="ID of the process to get output from",
     )
     tail: Optional[int] = Field(
@@ -360,7 +360,7 @@ class GetBackgroundProcessOutputToolHandler(ToolHandler[GetProcessOutputArgs]):
             )
         
     async def _do_run_tool(self, arguments: GetProcessOutputArgs) -> Sequence[TextContent]:
-        process_id = arguments.process_id
+        pid = arguments.pid
         tail = arguments.tail
         since = arguments.since
         until = arguments.until
@@ -370,118 +370,127 @@ class GetBackgroundProcessOutputToolHandler(ToolHandler[GetProcessOutputArgs]):
         time_prefix_format = arguments.time_prefix_format
         follow_seconds = arguments.follow_seconds
         
-        content: List[TextContent] = []
+        result_content: List[TextContent] = []
         
         try:
             # 获取进程对象
-            process = await default_shell_executor.get_process(process_id)
+            process = await default_shell_executor.get_process(pid)
             if not process:
-                raise ValueError(f"Process with ID {process_id} not found")
+                raise ValueError(f"Process with ID {pid} not found")
                 
             # 获取进程信息
-            process_info = None
-            if hasattr(process, 'process_info'):
-                process_info = process.process_info
-            else:
-                # 假设 process 是 BackgroundProcess 对象
-                process_info_dict = {}
-                for key in ['status', 'command', 'description', 'labels', 'start_time', 'end_time', 'exit_code']:
-                    if hasattr(process, key):
-                        process_info_dict[key] = getattr(process, key)
-                process_info = process_info_dict
-                
-            # 获取命令描述
-            cmd_str = process_info.shell_cmd if hasattr(process_info, 'shell_cmd') else process_info.get('command', '')
-            if isinstance(cmd_str, list):
-                cmd_str = ' '.join(cmd_str)
+            status_value = (
+                process.status.value 
+                if hasattr(process, 'status') 
+                else "unknown"
+            )
+            
+            cmd_str = (
+                process.command 
+                if hasattr(process, 'command') 
+                else getattr(process, 'shell_cmd', 'Unknown command')
+            )
+            
+            # 截断过长的命令
             if len(cmd_str) > 50:
                 cmd_str = cmd_str[:47] + "..."
-            
-            # 获取状态
-            status = process_info.status if hasattr(process_info, 'status') else process_info.get('status', 'unknown')
-            if isinstance(status, ProcessStatus):
-                status_value = status.value
-            else:
-                status_value = str(status)
                 
             # 添加进程信息作为第一个TextContent
-            status_info = f"**Process {process_id[:8]} (status: {status_value})**\n"
+            status_info = f"**Process {pid} (status: {status_value})**\n"
             status_info += f"Command: {cmd_str}\n"
             
-            # 获取描述
-            description = process_info.description if hasattr(process_info, 'description') else process_info.get('description', 'No description')
-            status_info += f"Description: {description}"
+            # 添加标签信息（如果有）
+            if hasattr(process, 'labels') and process.labels:
+                status_info += f"Labels: {', '.join(process.labels)}\n"
             
-            # 添加状态信息
-            if status == ProcessStatus.RUNNING or status_value == 'running':
-                status_info += "\nStatus: Process is still running"
-            elif status == ProcessStatus.COMPLETED or status_value == 'completed':
-                exit_code = process_info.exit_code if hasattr(process_info, 'exit_code') else process_info.get('exit_code')
-                status_info += f"\nStatus: Process completed successfully with exit code {exit_code}"
-            else:
-                exit_code = process_info.exit_code if hasattr(process_info, 'exit_code') else process_info.get('exit_code')
-                status_info += f"\nStatus: Process {status_value} with exit code {exit_code}"
+            # 添加执行时间信息
+            if hasattr(process, 'start_time'):
+                start_time = process.start_time.strftime('%Y-%m-%d %H:%M:%S')
+                status_info += f"Started at: {start_time}\n"
                 
-            content.append(TextContent(type="text", text=status_info))
+                if hasattr(process, 'end_time') and process.end_time:
+                    end_time = process.end_time.strftime('%Y-%m-%d %H:%M:%S')
+                    status_info += f"Ended at: {end_time}\n"
+                    
+                    # 计算运行时间
+                    duration = process.end_time - process.start_time
+                    duration_str = str(duration).split('.')[0]  # 移除微秒部分
+                    status_info += f"Duration: {duration_str}\n"
             
-            # 验证至少选择了一种输出类型
-            if not with_stdout and not with_stderr:
-                content.append(TextContent(
-                    type="text",
-                    text="---\nNo output requested. Set with_stdout=true or with_stderr=true to view logs.\n---"
-                ))
-                return content
-            
-            # 如果设置了follow_seconds，添加提示信息
-            if follow_seconds is not None and follow_seconds > 0:
-                follow_info = f"\n正在等待进程输出... ({follow_seconds}秒)"
-                content.append(TextContent(type="text", text=follow_info))
+            # 添加退出码信息（如果有）
+            if hasattr(process, 'exit_code') and process.exit_code is not None:
+                status_info += f"Exit code: {process.exit_code}\n"
                 
-                # 等待指定秒数
-                if status == ProcessStatus.RUNNING or status_value == 'running':
-                    await asyncio.sleep(follow_seconds)
+            result_content.append(TextContent(type="text", text=status_info))
             
-            # 如果需要查看标准输出
+            # 如果请求了标准输出
             if with_stdout:
                 # 使用 ShellExecutor 获取标准输出
                 stdout_output = await default_shell_executor.get_process_output(
-                    process_id=process_id,
+                    pid=pid,
                     tail=tail,
                     since=since,
                     until=until,
                     error=False
                 )
                 
-                content.append(self._format_process_output(
-                    stdout_output, 
-                    "stdout", 
-                    add_time_prefix, 
-                    time_prefix_format
-                ))
-                
-            # 如果需要查看错误输出
+                if stdout_output:
+                    # 格式化输出
+                    stdout_content = self._format_process_output(
+                        stdout_output, 
+                        "STDOUT", 
+                        add_time_prefix,
+                        time_prefix_format
+                    )
+                    result_content.append(stdout_content)
+                else:
+                    result_content.append(TextContent(
+                        type="text", 
+                        text="No standard output available"
+                    ))
+            
+            # 如果请求了错误输出
             if with_stderr:
                 # 使用 ShellExecutor 获取错误输出
                 stderr_output = await default_shell_executor.get_process_output(
-                    process_id=process_id,
+                    pid=pid,
                     tail=tail,
                     since=since,
                     until=until,
                     error=True
                 )
                 
-                content.append(self._format_process_output(
-                    stderr_output, 
-                    "stderr", 
-                    add_time_prefix, 
-                    time_prefix_format
+                if stderr_output:
+                    # 格式化输出
+                    stderr_content = self._format_process_output(
+                        stderr_output, 
+                        "STDERR", 
+                        add_time_prefix,
+                        time_prefix_format
+                    )
+                    result_content.append(stderr_content)
+                else:
+                    result_content.append(TextContent(
+                        type="text", 
+                        text="No error output available"
+                    ))
+                    
+            # 如果指定了follow_seconds，显示帮助信息
+            if follow_seconds is not None:
+                help_lines = [
+                    "\n---",
+                    "**To continue following output:**",
+                    "- For standard output: `shell_bg_logs(pid={}, follow_seconds=60)`".format(pid),
+                ]
+                if with_stderr:
+                    help_lines.append("- For error output: `shell_bg_logs(pid={}, with_stderr=True, follow_seconds=60)`".format(pid))
+                
+                result_content.append(TextContent(
+                    type="text",
+                    text="\n".join(help_lines)
                 ))
-            
                 
-            return content
-                
-        except ValueError as e:
-            raise ValueError(str(e))
+            return result_content
         except Exception as e:
             logger.error(f"Error getting process output: {e}")
             raise ValueError(f"Error getting process output: {str(e)}")
@@ -503,78 +512,94 @@ class CleanBackgroundProcessToolHandler(ToolHandler[CleanProcessArgs]):
         return CleanProcessArgs
         
     async def _do_run_tool(self, arguments: CleanProcessArgs) -> Sequence[TextContent]:
-        pids = arguments.process_ids
+        pids = arguments.pids
         
         # 结果表格
-        results = []
+        result_table = {
+            "cleaned": [],
+            "failed": [],
+            "running": []
+        }
         
+        # 验证进程列表
+        if not pids:
+            return [TextContent(type="text", text="No process IDs provided to clean up")]
+            
+        # 尝试清理每个进程
         for pid in pids:
             try:
-                # 获取进程状态
+                # 获取进程信息用于记录
                 process = await default_shell_executor.get_process(pid)
+                
                 if not process:
-                    results.append({
-                        "process_id": pid,
-                        "status": "FAILED",
-                        "message": "Process not found"
+                    result_table["failed"].append({
+                        "pid": pid,
+                        "reason": "Process not found"
                     })
                     continue
-                
-                # 检查进程是否运行中
-                status = None
-                if hasattr(process, 'process_info'):
-                    status = process.process_info.status
-                elif hasattr(process, 'status'):
-                    status = process.status
                     
-                if status == ProcessStatus.RUNNING or status == 'running':
-                    results.append({
-                        "process_id": pid,
-                        "status": "FAILED",
-                        "message": "Process is still running, cannot clean"
+                # 检查进程状态
+                is_running = False
+                if hasattr(process, 'is_running'):
+                    is_running = process.is_running()
+                elif hasattr(process, 'returncode'):
+                    is_running = process.returncode is None
+                    
+                if is_running:
+                    result_table["running"].append({
+                        "pid": pid,
+                        "command": getattr(process, 'command', 'Unknown command')[:30] + ('...' if len(getattr(process, 'command', '')) > 30 else '')
                     })
                     continue
                 
-                # 使用 default_shell_executor 清理进程
+                # 尝试清理进程
                 await default_shell_executor.clean_completed_process(pid)
-                results.append({
-                    "process_id": pid,
-                    "status": "SUCCESS",
-                    "message": "Process cleaned successfully"
+                
+                # 记录成功清理的进程
+                result_table["cleaned"].append({
+                    "pid": pid,
+                    "command": getattr(process, 'command', 'Unknown command')[:30] + ('...' if len(getattr(process, 'command', '')) > 30 else '')
                 })
-            except ValueError as e:
-                results.append({
-                    "process_id": pid,
-                    "status": "FAILED",
-                    "message": str(e)
-                })
+                
             except Exception as e:
                 logger.error(f"Error cleaning process {pid}: {e}")
-                results.append({
-                    "process_id": pid,
-                    "status": "ERROR",
-                    "message": f"Unexpected error: {str(e)}"
+                result_table["failed"].append({
+                    "pid": pid,
+                    "reason": str(e)
                 })
+                
+        # 生成结果消息
+        result_lines = []
         
-        # 格式化输出
-        lines = ["PROCESS ID | STATUS | MESSAGE"]
-        lines.append("-" * 100)
-        
-        for result in results:
-            pid = result["process_id"]
-            status = result["status"]
-            message = result["message"]
-            lines.append(f"{pid} | {status} | {message}")
+        # 添加成功清理的进程
+        if result_table["cleaned"]:
+            result_lines.append(f"**Successfully cleaned {len(result_table['cleaned'])} processes:**")
+            for proc in result_table["cleaned"]:
+                result_lines.append(f"- PID: {proc['pid']} | Command: {proc['command']}")
+                
+        # 添加运行中的进程
+        if result_table["running"]:
+            result_lines.append(f"\n**Unable to clean {len(result_table['running'])} running processes:**")
+            result_lines.append("Note: Cannot clean running processes. Stop them first with `shell_bg_stop()`.")
+            for proc in result_table["running"]:
+                result_lines.append(f"- PID: {proc['pid']} | Command: {proc['command']}")
+                
+        # 添加失败的进程
+        if result_table["failed"]:
+            result_lines.append(f"\n**Failed to clean {len(result_table['failed'])} processes:**")
+            for proc in result_table["failed"]:
+                result_lines.append(f"- PID: {proc['pid']} | Reason: {proc['reason']}")
+                
+        # 如果没有任何处理结果，添加默认消息
+        if not result_lines:
+            result_lines.append("No processes were processed.")
             
-        return [TextContent(
-            type="text",
-            text="\n".join(lines)
-        )]
+        return [TextContent(type="text", text="\n".join(result_lines))]
 
 
 class GetProcessDetailArgs(BaseModel):
     """获取进程详情的参数模型"""
-    process_id: str = Field(
+    pid: int = Field(
         description="ID of the process to get details for",
     )
 
@@ -595,165 +620,92 @@ class GetBackgroundProcessDetailToolHandler(ToolHandler[GetProcessDetailArgs]):
         return GetProcessDetailArgs
         
     async def _do_run_tool(self, arguments: GetProcessDetailArgs) -> Sequence[TextContent]:
-        pid = arguments.process_id
+        pid = arguments.pid
         
         try:
-            # 使用 ShellExecutor 获取进程详情
+            # 获取进程
             process = await default_shell_executor.get_process(pid)
             if not process:
-                raise ValueError(f"Process with ID {pid} not found")
-                
-            # 获取进程信息
-            process_info = None
-            if hasattr(process, 'process_info'):
-                process_info = process.process_info
-            elif hasattr(process, 'get_info'):
-                process_info = process.get_info()
-            else:
-                # 假设 process 是 BackgroundProcess 对象
-                process_info_dict = {}
-                for key in ['command', 'directory', 'description', 'labels', 
-                           'status', 'start_time', 'end_time', 'exit_code']:
-                    if hasattr(process, key):
-                        process_info_dict[key] = getattr(process, key)
-                process_info = process_info_dict
-                
-            # 格式化输出
-            lines = [f"### Process Details: {pid}"]
-            lines.append("")
+                raise ValueError(f"Process {pid} not found")
+            
+            # 获取进程详细信息
+            lines = [f"**Process Details for PID {pid}**"]
             
             # 基本信息
-            lines.append("#### Basic Information")
+            lines.append("\n**Basic Information:**")
             
-            # 获取状态
-            status = None
-            if hasattr(process_info, 'status'):
-                status = process_info.status
-            else:
-                status = process_info.get('status', 'unknown')
-                
-            if isinstance(status, ProcessStatus):
-                status_value = status.value
-            else:
-                status_value = str(status)
-                
-            lines.append(f"- **Status**: {status_value}")
+            # 命令
+            command = getattr(process, 'command', None)
+            if command:
+                lines.append(f"Command: `{command}`")
             
-            # 获取命令
-            command = None
-            if hasattr(process_info, 'shell_cmd'):
-                command = process_info.shell_cmd
-            else:
-                command = process_info.get('command', '')
-                
-            if isinstance(command, list):
-                command = ' '.join(command)
-                
-            lines.append(f"- **Command**: `{command}`")
+            # 状态
+            status = getattr(process, 'status', None)
+            if status:
+                lines.append(f"Status: {status.value if hasattr(status, 'value') else status}")
             
-            # 获取描述
-            description = None
-            if hasattr(process_info, 'description'):
-                description = process_info.description
-            else:
-                description = process_info.get('description', 'No description')
-                
-            lines.append(f"- **Description**: {description}")
+            # 目录
+            directory = getattr(process, 'directory', None)
+            if directory:
+                lines.append(f"Working Directory: {directory}")
             
-            # 获取标签
-            labels = None
-            if hasattr(process_info, 'labels'):
-                labels = process_info.labels
-            else:
-                labels = process_info.get('labels', [])
-                
-            if labels:
-                lines.append(f"- **Labels**: {', '.join(labels)}")
+            # 描述
+            description = getattr(process, 'description', None)
+            if description:
+                lines.append(f"Description: {description}")
+            
+            # 标签
+            labels = getattr(process, 'labels', None)
+            if labels and len(labels) > 0:
+                lines.append(f"Labels: {', '.join(labels)}")
             
             # 时间信息
-            lines.append("")
-            lines.append("#### Timing")
+            lines.append("\n**Timing Information:**")
             
-            # 获取开始时间
-            start_time = None
-            if hasattr(process_info, 'start_time'):
-                start_time = process_info.start_time
-            else:
-                start_time = process_info.get('start_time')
-                
-            if isinstance(start_time, str):
-                start_time_str = start_time.replace('T', ' ').split('.')[0]
-            elif isinstance(start_time, datetime):
-                start_time_str = start_time.strftime("%Y-%m-%d %H:%M:%S")
-            else:
-                start_time_str = "Unknown"
-                
-            lines.append(f"- **Started**: {start_time_str}")
+            # 开始时间
+            start_time = getattr(process, 'start_time', None)
+            if start_time:
+                lines.append(f"Started: {start_time.strftime('%Y-%m-%d %H:%M:%S')}")
             
-            # 获取结束时间
-            end_time = None
-            if hasattr(process_info, 'end_time'):
-                end_time = process_info.end_time
-            else:
-                end_time = process_info.get('end_time')
-                
+            # 结束时间
+            end_time = getattr(process, 'end_time', None)
             if end_time:
-                if isinstance(end_time, str):
-                    end_time_str = end_time.replace('T', ' ').split('.')[0]
-                elif isinstance(end_time, datetime):
-                    end_time_str = end_time.strftime("%Y-%m-%d %H:%M:%S")
-                else:
-                    end_time_str = "Unknown"
-                    
-                lines.append(f"- **Ended**: {end_time_str}")
+                lines.append(f"Ended: {end_time.strftime('%Y-%m-%d %H:%M:%S')}")
                 
-                # 计算运行时间
-                try:
-                    if isinstance(start_time, str) and isinstance(end_time, str):
-                        start_dt = datetime.fromisoformat(start_time)
-                        end_dt = datetime.fromisoformat(end_time)
-                        duration = end_dt - start_dt
-                    elif isinstance(start_time, datetime) and isinstance(end_time, datetime):
-                        duration = end_time - start_time
-                    else:
-                        duration = "Unknown"
-                    lines.append(f"- **Duration**: {duration}")
-                except Exception:
-                    lines.append(f"- **Duration**: Unable to calculate")
+                # 计算持续时间
+                duration = end_time - start_time
+                duration_str = str(duration).split('.')[0]  # 移除微秒部分
+                lines.append(f"Duration: {duration_str}")
             
-            # 执行信息
-            lines.append("")
-            lines.append("#### Execution")
-            
-            # 获取工作目录
-            directory = None
-            if hasattr(process_info, 'directory'):
-                directory = process_info.directory
-            else:
-                directory = process_info.get('directory', 'Unknown')
-                
-            lines.append(f"- **Working Directory**: {directory}")
-            
-            # 获取退出码
-            exit_code = None
-            if hasattr(process_info, 'exit_code'):
-                exit_code = process_info.exit_code
-            else:
-                exit_code = process_info.get('exit_code')
-                
+            # 退出码
+            exit_code = getattr(process, 'exit_code', None)
             if exit_code is not None:
-                lines.append(f"- **Exit Code**: {exit_code}")
+                lines.append(f"Exit Code: {exit_code}")
             
-            # 进程输出信息
-            lines.append("")
-            lines.append("#### Output Information")
-            lines.append(f"- Use `shell_bg_logs` tool to view process output")
-            lines.append(f"- Example: `shell_bg_logs(process_id='{pid}')`")
+            # 环境变量
+            envs = getattr(process, 'envs', None)
+            if envs and len(envs) > 0:
+                lines.append("\n**Environment Variables:**")
+                for key, value in envs.items():
+                    lines.append(f"- {key}={value}")
             
-            return [TextContent(
-                type="text",
-                text="\n".join(lines)
-            )]
+            # 输出信息
+            lines.append("\n**Output Information:**")
+            lines.append("To view standard output: `shell_bg_logs(pid={})`".format(pid))
+            lines.append("To view error output: `shell_bg_logs(pid={}, with_stderr=True)`".format(pid))
+            
+            # 控制命令
+            lines.append("\n**Control Commands:**")
+            
+            # 根据进程状态提供不同的命令
+            if status == ProcessStatus.RUNNING or (isinstance(status, str) and status == 'running'):
+                lines.append("Stop the process: `shell_bg_stop(pid={})`".format(pid))
+                lines.append("Force stop the process: `shell_bg_stop(pid={}, force=True)`".format(pid))
+            else:
+                lines.append("Clean up the process: `shell_bg_clean(pids=[{}])`".format(pid))
+            
+            return [TextContent(type="text", text="\n".join(lines))]
+            
         except ValueError as e:
             raise ValueError(str(e))
         except Exception as e:

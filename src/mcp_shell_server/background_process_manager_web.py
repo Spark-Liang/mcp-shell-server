@@ -22,239 +22,268 @@ process_manager = default_shell_executor.process_manager
 
 @app.route('/')
 def index():
-    """进程列表页面"""
+    """显示进程管理首页"""
     return render_template('process_list.html')
 
-@app.route('/process/<process_id>')
-def process_detail(process_id):
-    """进程详情页面"""
-    return render_template('process_detail.html', process_id=process_id)
+@app.route('/process/<int:pid>')
+def process_detail(pid):
+    """显示单个进程详细信息的页面"""
+    # 根据进程ID获取进程信息，然后渲染模板
+    return render_template('process_detail.html', pid=pid)
 
 @app.route('/api/processes')
-def get_processes():
-    """获取进程列表API"""
-    # 异步转同步调用
+def list_processes():
+    """获取所有进程信息"""
+    # 从查询参数获取过滤条件
+    labels = request.args.get('labels')
+    status = request.args.get('status')
+    
+    # 转换标签为列表
+    labels_list = labels.split(',') if labels else None
+    
+    # 创建事件循环
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     
     try:
-        labels = request.args.getlist('labels')
-        status = request.args.get('status')
+        # 异步获取进程列表
+        processes = loop.run_until_complete(process_manager.list_processes(
+            labels=labels_list,
+            status=status
+        ))
         
-        processes = loop.run_until_complete(
-            process_manager.list_processes(
-                labels=labels if labels else None,
-                status=status if status else None
-            )
-        )
-        return jsonify(processes)
+        return jsonify([proc.to_dict() for proc in processes])
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
     finally:
         loop.close()
 
-@app.route('/api/process/<process_id>')
-def get_process(process_id):
-    """获取单个进程信息API"""
+@app.route('/api/process/<int:pid>')
+def get_process(pid):
+    """获取单个进程信息"""
+    # 创建事件循环
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     
     try:
-        process = loop.run_until_complete(process_manager.get_process(process_id))
-        if not process:
-            return jsonify({"error": "进程不存在"}), 404
+        # 异步获取进程信息
+        process = loop.run_until_complete(process_manager.get_process(pid))
         
-        process_info = process.get_info()
-        return jsonify(process_info)
-    finally:
-        loop.close()
-
-@app.route('/api/process/<process_id>/output')
-def get_process_output(process_id):
-    """获取进程输出API"""
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    
-    try:
-        # 获取参数
-        tail = request.args.get('tail', type=int)
-        since = request.args.get('since')
-        until = request.args.get('until')
-        with_stderr = request.args.get('stderr', 'false').lower() == 'true'
-        
-        # 检查进程是否存在
-        process = loop.run_until_complete(process_manager.get_process(process_id))
         if not process:
-            return jsonify({"error": "进程不存在"}), 404
+            return jsonify({"error": f"Process {pid} not found"}), 404
             
-        # 获取进程输出
-        stdout = loop.run_until_complete(
-            process_manager.get_process_output(
-                pid=process_id,
+        return jsonify(process.to_dict())
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    finally:
+        loop.close()
+
+@app.route('/api/process/<int:pid>/output')
+def get_process_output(pid):
+    """获取进程输出"""
+    # 从查询参数获取选项
+    tail = request.args.get('tail', type=int)
+    since = request.args.get('since')
+    until = request.args.get('until')
+    with_stdout = request.args.get('stdout', 'true').lower() == 'true'
+    with_stderr = request.args.get('stderr', 'false').lower() == 'true'
+    
+    # 创建事件循环
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    
+    try:
+        # 验证进程存在
+        process = loop.run_until_complete(process_manager.get_process(pid))
+        if not process:
+            return jsonify({"error": f"Process {pid} not found"}), 404
+        
+        # 获取标准输出
+        stdout = []
+        if with_stdout:
+            stdout = loop.run_until_complete(process_manager.get_process_output(
+                pid=pid,
                 tail=tail,
                 since_time=since,
                 until_time=until,
                 error=False
-            )
-        )
+            ))
         
-        # 如果需要，获取错误输出
+        # 获取错误输出
         stderr = []
         if with_stderr:
-            stderr = loop.run_until_complete(
-                process_manager.get_process_output(
-                    pid=process_id,
-                    tail=tail,
-                    since_time=since,
-                    until_time=until,
-                    error=True
-                )
-            )
-            
-        return jsonify({
-            "stdout": stdout,
-            "stderr": stderr if with_stderr else []
-        })
-    except ValueError as e:
-        return jsonify({"error": str(e)}), 400
+            stderr = loop.run_until_complete(process_manager.get_process_output(
+                pid=pid,
+                tail=tail,
+                since_time=since,
+                until_time=until,
+                error=True
+            ))
+        
+        # 转换为字典列表
+        result = {
+            "stdout": [entry.to_dict() for entry in stdout],
+            "stderr": [entry.to_dict() for entry in stderr]
+        }
+        
+        return jsonify(result)
     except Exception as e:
-        logger.error(f"获取进程输出时出错: {e}")
-        return jsonify({"error": "获取进程输出时出错"}), 500
+        return jsonify({"error": str(e)}), 500
     finally:
         loop.close()
 
-@app.route('/api/process/<process_id>/stop', methods=['POST'])
-def stop_process_api(process_id):
-    """停止进程API"""
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    
+@app.route('/api/process/<int:pid>/stop', methods=['POST'])
+def stop_process_api(pid):
+    """停止进程"""
     try:
-        # 获取是否强制停止的参数
+        # 从请求体获取选项
         force = request.json.get('force', False) if request.is_json else False
         
-        # 获取进程信息（用于返回消息）
-        process = loop.run_until_complete(process_manager.get_process(process_id))
-        if not process:
-            return jsonify({"error": "进程不存在"}), 404
+        # 创建事件循环
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        try:
+            # 验证进程存在
+            process = loop.run_until_complete(process_manager.get_process(pid))
+            if not process:
+                return jsonify({"error": f"Process {pid} not found"}), 404
+                
+            # 检查进程是否已经完成
+            if process.status != ProcessStatus.RUNNING:
+                return jsonify({
+                    "status": "error",
+                    "message": f"Process is not running (status: {process.status.value})"
+                }), 400
+                
+            # 异步停止进程
+            # 直接使用事件循环执行停止操作
+            loop.run_until_complete(
+                process_manager.stop_process(pid, force=force)
+            )
             
-        # 检查进程是否正在运行
-        is_running = False
-        if hasattr(process, 'is_running'):
-            is_running = process.is_running()
-        elif hasattr(process, 'process_info'):
-            status = process.process_info.status
-            is_running = status == 'running' or status.value == 'running' if hasattr(status, 'value') else False
-        
-        if not is_running:
-            return jsonify({"message": "进程已经停止，无需再次停止"}), 200
-        
-        # 停止进程
-        result = loop.run_until_complete(
-            process_manager.stop_process(process_id, force=force)
-        )
-        
-        return jsonify({
-            "success": result,
-            "message": f"进程已{'强制' if force else ''}停止",
-            "process_id": process_id
-        })
-    except ValueError as e:
-        return jsonify({"error": str(e)}), 400
+            return jsonify({
+                "status": "success",
+                "message": f"Process {pid} stopped successfully",
+                "pid": pid
+            })
+        finally:
+            loop.close()
     except Exception as e:
-        logger.error(f"停止进程时出错: {e}")
-        return jsonify({"error": f"停止进程时出错: {str(e)}"}), 500
-    finally:
-        loop.close()
+        return jsonify({"error": str(e)}), 500
 
-@app.route('/api/process/<process_id>/clean', methods=['POST'])
-def clean_process_api(process_id):
-    """清理进程API"""
+@app.route('/api/process/<int:pid>/clean', methods=['POST'])
+def clean_process_api(pid):
+    """清理进程"""
+    try:
+        # 创建事件循环
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        try:
+            # 验证进程存在
+            process = loop.run_until_complete(process_manager.get_process(pid))
+            if not process:
+                return jsonify({"error": f"Process {pid} not found"}), 404
+                
+            # 异步清理进程
+            loop.run_until_complete(
+                process_manager.clean_completed_process(pid)
+            )
+            
+            return jsonify({
+                "status": "success",
+                "message": f"Process {pid} cleaned successfully",
+                "pid": pid
+            })
+        finally:
+            loop.close()
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/process/clean_all', methods=['POST'])
+def clean_all_processes_api():
+    """清理所有进程"""
+    # 创建事件循环
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     
     try:
-        # 获取进程信息（用于返回消息）
-        process = loop.run_until_complete(process_manager.get_process(process_id))
-        if not process:
-            return jsonify({"error": "进程不存在"}), 404
-            
-        # 清理进程
-        result = loop.run_until_complete(
-            process_manager.clean_completed_process(process_id)
-        )
+        # 异步清理所有进程
+        loop.run_until_complete(process_manager.cleanup_all())
         
         return jsonify({
-            "success": result,
-            "message": "进程已清理",
-            "process_id": process_id
+            "status": "success",
+            "message": "All completed processes cleaned successfully"
         })
-    except ValueError as e:
-        # 如果进程仍在运行会抛出ValueErrpr
-        return jsonify({"error": str(e)}), 400
     except Exception as e:
-        logger.error(f"清理进程时出错: {e}")
-        return jsonify({"error": f"清理进程时出错: {str(e)}"}), 500
+        return jsonify({"error": str(e)}), 500
     finally:
         loop.close()
 
-@app.route('/api/processes/batch-clean', methods=['POST'])
-def batch_clean_processes():
-    """批量清理进程API"""
+@app.route('/api/process/clean_selected', methods=['POST'])
+def clean_selected_processes_api():
+    """清理选定的进程"""
+    # 检查请求体
+    if not request.is_json:
+        return jsonify({"error": "Request must be JSON"}), 400
+        
+    # 获取进程ID列表
+    pids = request.json.get('pids', [])
+    if not pids:
+        return jsonify({"error": "No process IDs provided"}), 400
+        
+    # 转换为整数类型
+    pids = [int(pid) for pid in pids]
+        
+    # 结果记录
+    results = {
+        "success": [],
+        "failed": [],
+        "running": [],
+        "not_found": []
+    }
+    
+    # 创建事件循环
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     
     try:
-        # 获取进程ID列表
-        if not request.is_json:
-            return jsonify({"error": "请求必须是JSON格式"}), 400
-            
-        process_ids = request.json.get('process_ids', [])
-        if not process_ids:
-            return jsonify({"error": "未提供进程ID列表"}), 400
-            
-        # 批量清理进程
-        results = []
-        for proc_id in process_ids:
+        # 逐个清理进程
+        for pid in pids:
             try:
-                process = loop.run_until_complete(process_manager.get_process(proc_id))
+                # 获取进程信息
+                process = loop.run_until_complete(process_manager.get_process(pid))
+                
                 if not process:
-                    results.append({
-                        "process_id": proc_id,
-                        "success": False,
-                        "message": "进程不存在"
+                    results["not_found"].append({
+                        "pid": pid,
+                        "message": "Process not found"
                     })
                     continue
                     
-                # 尝试清理进程
-                result = loop.run_until_complete(
-                    process_manager.clean_completed_process(proc_id)
-                )
-                
-                results.append({
-                    "process_id": proc_id,
-                    "success": result,
-                    "message": "进程已清理"
+                # 检查进程状态
+                if process.status == ProcessStatus.RUNNING:
+                    results["running"].append({
+                        "pid": pid,
+                        "message": "Process is still running"
+                    })
+                    continue
+                    
+                # 清理进程
+                loop.run_until_complete(process_manager.clean_completed_process(pid))
+                results["success"].append({
+                    "pid": pid,
+                    "message": "Process cleaned successfully"
                 })
-            except ValueError as e:
-                results.append({
-                    "process_id": proc_id,
-                    "success": False,
+                
+            except Exception as e:
+                results["failed"].append({
+                    "pid": pid,
                     "message": str(e)
                 })
-            except Exception as e:
-                results.append({
-                    "process_id": proc_id,
-                    "success": False,
-                    "message": f"清理时出错: {str(e)}"
-                })
-        
-        return jsonify({
-            "results": results,
-            "success_count": sum(1 for r in results if r["success"]),
-            "failure_count": sum(1 for r in results if not r["success"])
-        })
-    except Exception as e:
-        logger.error(f"批量清理进程时出错: {e}")
-        return jsonify({"error": f"批量清理进程时出错: {str(e)}"}), 500
+                
+        return jsonify(results)
     finally:
         loop.close()
 

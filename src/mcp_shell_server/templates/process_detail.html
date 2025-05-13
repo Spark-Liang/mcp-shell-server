@@ -1,447 +1,532 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>进程详情 - 后台进程管理</title>
+    <title>Process Detail</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
         body {
-            font-family: Arial, sans-serif;
-            margin: 0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             padding: 20px;
-            background-color: #f5f5f5;
+            background-color: #f8f9fa;
         }
-        .container {
-            max-width: 1200px;
-            margin: 0 auto;
-            background-color: #fff;
-            padding: 20px;
-            border-radius: 5px;
-            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
-        }
-        h1, h2 {
-            color: #333;
-        }
-        .back-link {
+        .navbar {
             margin-bottom: 20px;
-            display: block;
-        }
-        .info-card {
-            margin-bottom: 20px;
-            padding: 20px;
-            background-color: #f9f9f9;
+            background-color: #343a40;
             border-radius: 5px;
-            border-left: 4px solid #4CAF50;
         }
-        .info-table {
-            width: 100%;
-            border-collapse: collapse;
-        }
-        .info-table th {
-            width: 150px;
-            text-align: right;
-            padding: 8px 16px;
-            color: #666;
-        }
-        .info-table td {
-            padding: 8px 16px;
-        }
-        .status-running {
-            color: green;
+        .navbar-brand {
+            color: white !important;
             font-weight: bold;
         }
-        .status-completed {
-            color: blue;
+        .card {
+            margin-bottom: 20px;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
         }
-        .status-failed, .status-error {
-            color: red;
+        .card-header {
+            background-color: #6c757d;
+            color: white;
+            font-weight: bold;
+            border-top-left-radius: 10px;
+            border-top-right-radius: 10px;
         }
-        .status-terminated {
-            color: orange;
+        .btn-custom {
+            margin-right: 5px;
         }
-        .output-container {
-            margin-top: 30px;
+        pre {
+            background-color: #f8f9fa;
+            padding: 10px;
+            border-radius: 5px;
+            white-space: pre-wrap;
+            max-height: 400px;
+            overflow-y: auto;
         }
-        .output-tabs {
-            display: flex;
+        table {
+            width: 100%;
+        }
+        th {
+            background-color: #e9ecef;
+        }
+        .loading {
+            display: inline-block;
+            width: 1.5rem;
+            height: 1.5rem;
+            border: 0.25rem solid #f3f3f3;
+            border-radius: 50%;
+            border-top: 0.25rem solid #3498db;
+            animation: spin 1s linear infinite;
+            margin-right: 10px;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .hidden {
+            display: none;
+        }
+        .log-container {
+            background-color: #f8f9fa;
+            border-radius: 5px;
+            padding: 10px;
             margin-bottom: 10px;
         }
-        .tab {
-            padding: 10px 20px;
-            background-color: #f2f2f2;
-            border: 1px solid #ddd;
-            border-radius: 5px 5px 0 0;
-            margin-right: 5px;
-            cursor: pointer;
-        }
-        .tab.active {
-            background-color: #fff;
-            border-bottom: 1px solid #fff;
-        }
-        .output-content {
-            border: 1px solid #ddd;
-            padding: 20px;
-            min-height: 300px;
-            border-radius: 0 5px 5px 5px;
-            background-color: #3030f6;
-            color: #f0f0f0;
+        .log-entry {
             font-family: monospace;
-            overflow: auto;
             white-space: pre-wrap;
+            margin: 0;
+            padding: 0;
         }
-        .action-buttons {
-            margin-top: 20px;
-            display: flex;
-            gap: 10px;
+        .log-timestamp {
+            color: #6c757d;
+            font-size: 0.8rem;
         }
-        .btn {
-            padding: 10px 20px;
-            border: none;
-            border-radius: 5px;
-            cursor: pointer;
-            font-size: 16px;
-            font-weight: bold;
+        .log-text {
+            color: #212529;
         }
-        .btn-stop {
-            background-color: #f44336;
-            color: white;
+        .log-error {
+            color: #dc3545;
         }
-        .btn-clean {
-            background-color: #2196F3;
-            color: white;
-        }
-        .btn-refresh {
-            background-color: #4CAF50;
-            color: white;
-        }
-        .output-filter {
-            margin-bottom: 15px;
-            padding: 10px;
-            background-color: #f8f8f8;
-            border-radius: 5px;
-            display: flex;
-            flex-wrap: wrap;
-            align-items: center;
-            gap: 10px;
-        }
-        .output-filter label {
+        .badge {
             margin-right: 5px;
         }
-        .output-filter input, .output-filter select {
-            padding: 5px;
-            border: 1px solid #ddd;
-            border-radius: 3px;
+        #refreshRate {
+            width: 70px;
+            display: inline-block;
         }
-        .output-filter button {
-            padding: 5px 10px;
-            background-color: #4CAF50;
-            color: white;
-            border: none;
-            border-radius: 3px;
-            cursor: pointer;
+        .status-running {
+            color: #28a745;
+        }
+        .status-completed {
+            color: #17a2b8;
+        }
+        .status-failed {
+            color: #dc3545;
+        }
+        .status-terminated {
+            color: #ffc107;
         }
     </style>
 </head>
 <body>
-    <div class="container">
-        <a href="/" class="back-link">&larr; 返回进程列表</a>
-        <h1>进程详情</h1>
-        
-        <div class="info-card">
-            <h2 id="processTitle">加载中...</h2>
-            <table class="info-table">
-                <tr>
-                    <th>进程ID:</th>
-                    <td id="processId">{{ process_id }}</td>
-                </tr>
-                <tr>
-                    <th>命令:</th>
-                    <td id="processCommand">-</td>
-                </tr>
-                <tr>
-                    <th>工作目录:</th>
-                    <td id="processDirectory">-</td>
-                </tr>
-                <tr>
-                    <th>描述:</th>
-                    <td id="processDescription">-</td>
-                </tr>
-                <tr>
-                    <th>状态:</th>
-                    <td id="processStatus">-</td>
-                </tr>
-                <tr>
-                    <th>开始时间:</th>
-                    <td id="processStartTime">-</td>
-                </tr>
-                <tr>
-                    <th>结束时间:</th>
-                    <td id="processEndTime">-</td>
-                </tr>
-                <tr>
-                    <th>退出代码:</th>
-                    <td id="processExitCode">-</td>
-                </tr>
-                <tr>
-                    <th>标签:</th>
-                    <td id="processLabels">-</td>
-                </tr>
-            </table>
-            
-            <div class="action-buttons">
-                <div id="actionButtonsContainer">
-                    <!-- 按钮将根据进程状态动态生成 -->
-                </div>
-                <button class="btn btn-refresh" onclick="refreshProcess()">刷新</button>
+    <nav class="navbar navbar-expand-lg navbar-dark">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="/">MCP Shell Server</a>
+            <div>
+                <a href="/" class="btn btn-outline-light">Back to Process List</a>
             </div>
         </div>
-        
-        <div class="output-container">
-            <h2>进程输出</h2>
-            
-            <div class="output-filter">
-                <div>
-                    <label for="tailLines">显示最后行数:</label>
-                    <input type="number" id="tailLines" min="1" value="100">
+    </nav>
+
+    <div class="container-fluid">
+        <div class="row">
+            <div class="col-md-5">
+                <!-- Process Information Card -->
+                <div class="card">
+                    <div class="card-header">Process Information</div>
+                    <div class="card-body">
+                        <div id="loadingInfo" class="text-center">
+                            <div class="loading"></div> Loading process information...
+                        </div>
+                        <div id="processInfo" class="hidden">
+                            <h5 id="processTitle" class="card-title">Process Detail</h5>
+                            <table class="table table-bordered">
+                                <tr>
+                                    <th>PID</th>
+                                    <td id="pid">{{ pid }}</td>
+                                </tr>
+                                <tr>
+                                    <th>Status</th>
+                                    <td id="status"></td>
+                                </tr>
+                                <tr>
+                                    <th>Command</th>
+                                    <td id="command"></td>
+                                </tr>
+                                <tr>
+                                    <th>Directory</th>
+                                    <td id="directory"></td>
+                                </tr>
+                                <tr>
+                                    <th>Description</th>
+                                    <td id="description"></td>
+                                </tr>
+                                <tr>
+                                    <th>Labels</th>
+                                    <td id="labels"></td>
+                                </tr>
+                                <tr>
+                                    <th>Start Time</th>
+                                    <td id="startTime"></td>
+                                </tr>
+                                <tr>
+                                    <th>End Time</th>
+                                    <td id="endTime"></td>
+                                </tr>
+                                <tr>
+                                    <th>Exit Code</th>
+                                    <td id="exitCode"></td>
+                                </tr>
+                            </table>
+                            <div id="processActions" class="mt-3">
+                                <button id="stopBtn" class="btn btn-warning btn-custom">Stop Process</button>
+                                <button id="forceStopBtn" class="btn btn-danger btn-custom">Force Stop</button>
+                                <button id="cleanBtn" class="btn btn-secondary btn-custom">Clean Process</button>
+                            </div>
+                        </div>
+                        <div id="processError" class="hidden alert alert-danger mt-3"></div>
+                    </div>
                 </div>
-                <div>
-                    <label for="showStderr">显示错误输出:</label>
-                    <input type="checkbox" id="showStderr">
+                
+                <!-- Output Control Card -->
+                <div class="card">
+                    <div class="card-header">Output Settings</div>
+                    <div class="card-body">
+                        <div class="mb-3">
+                            <div class="form-check form-check-inline">
+                                <input class="form-check-input" type="checkbox" id="showStdout" checked>
+                                <label class="form-check-label" for="showStdout">Show Standard Output</label>
+                            </div>
+                            <div class="form-check form-check-inline">
+                                <input class="form-check-input" type="checkbox" id="showStderr">
+                                <label class="form-check-label" for="showStderr">Show Error Output</label>
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <label for="tailLines">Tail Lines:</label>
+                            <input type="number" id="tailLines" class="form-control form-control-sm" style="width: 100px; display: inline-block;" value="100" min="1">
+                        </div>
+                        <div class="mb-3">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="autoRefresh">
+                                <label class="form-check-label" for="autoRefresh">Auto Refresh</label>
+                            </div>
+                            <div id="refreshControls" class="mt-2 hidden">
+                                <label for="refreshRate">Refresh every</label>
+                                <select id="refreshRate" class="form-control form-control-sm">
+                                    <option value="1">1 sec</option>
+                                    <option value="2">2 sec</option>
+                                    <option value="5" selected>5 sec</option>
+                                    <option value="10">10 sec</option>
+                                    <option value="30">30 sec</option>
+                                </select>
+                            </div>
+                        </div>
+                        <button id="refreshBtn" class="btn btn-primary">Refresh Output</button>
+                    </div>
                 </div>
-                <button onclick="refreshOutput()">应用筛选</button>
             </div>
             
-            <div class="output-tabs">
-                <div class="tab active" onclick="switchTab('stdout')">标准输出</div>
-                <div class="tab" onclick="switchTab('stderr')">错误输出</div>
+            <div class="col-md-7">
+                <!-- Process Output Card -->
+                <div class="card">
+                    <div class="card-header">Process Output</div>
+                    <div class="card-body">
+                        <div id="loadingOutput" class="text-center">
+                            <div class="loading"></div> Loading process output...
+                        </div>
+                        <div id="outputContainer" class="hidden">
+                            <div id="stdoutContainer" class="log-container">
+                                <h6>Standard Output</h6>
+                                <div id="stdout"></div>
+                            </div>
+                            <div id="stderrContainer" class="log-container hidden">
+                                <h6>Error Output</h6>
+                                <div id="stderr"></div>
+                            </div>
+                        </div>
+                        <div id="outputError" class="hidden alert alert-danger mt-3"></div>
+                    </div>
+                </div>
             </div>
-            
-            <div id="stdoutContent" class="output-content">等待加载...</div>
-            <div id="stderrContent" class="output-content" style="display: none;">等待加载...</div>
         </div>
     </div>
-
+    
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
     <script>
-        // 当前进程ID
-        const processId = "{{ process_id }}";
-        // 当前活动标签
-        let activeTab = 'stdout';
-        // 进程详情
-        let processInfo = null;
+        // Process ID from template
+        const pid = {{ pid }};
         
-        // 页面加载完成后加载进程信息
-        document.addEventListener('DOMContentLoaded', function() {
+        // Auto-refresh interval ID
+        let refreshIntervalId = null;
+        
+        // On page load
+        $(document).ready(function() {
+            // Load initial data
             loadProcessInfo();
-            refreshOutput();
+            loadProcessOutput();
             
-            // 每5秒刷新一次进程信息（只有在running状态下）
-            setInterval(function() {
-                if (processInfo && processInfo.status === 'running') {
-                    loadProcessInfo(false);
-                    refreshOutput(false);
+            // Set up event handlers
+            $("#refreshBtn").click(loadProcessOutput);
+            $("#stopBtn").click(() => stopProcess(false));
+            $("#forceStopBtn").click(() => stopProcess(true));
+            $("#cleanBtn").click(cleanProcess);
+            
+            // Auto-refresh toggle
+            $("#autoRefresh").change(function() {
+                if ($(this).is(":checked")) {
+                    $("#refreshControls").removeClass("hidden");
+                    startAutoRefresh();
+                } else {
+                    $("#refreshControls").addClass("hidden");
+                    stopAutoRefresh();
                 }
-            }, 5000);
+            });
+            
+            // Refresh rate change
+            $("#refreshRate").change(function() {
+                if ($("#autoRefresh").is(":checked")) {
+                    stopAutoRefresh();
+                    startAutoRefresh();
+                }
+            });
+            
+            // Output filter changes
+            $("#showStdout, #showStderr").change(updateOutputVisibility);
         });
         
-        // 加载进程信息
-        function loadProcessInfo(showLoading = true) {
-            if (showLoading) {
-                document.getElementById('processTitle').textContent = "加载中...";
-            }
+        // Load process information
+        function loadProcessInfo() {
+            $("#loadingInfo").removeClass("hidden");
+            $("#processInfo").addClass("hidden");
+            $("#processError").addClass("hidden");
             
-            fetch(`/api/process/${processId}`)
-                .then(response => {
-                    if (!response.ok) {
-                        throw new Error('进程不存在');
-                    }
-                    return response.json();
-                })
-                .then(process => {
-                    processInfo = process;
-                    displayProcessInfo(process);
-                    updateActionButtons(process);
-                })
-                .catch(error => {
-                    console.error('获取进程信息失败:', error);
-                    document.getElementById('processTitle').textContent = "错误: " + error.message;
-                });
-        }
-        
-        // 显示进程信息
-        function displayProcessInfo(process) {
-            document.getElementById('processTitle').textContent = process.description;
-            document.getElementById('processCommand').textContent = process.command.join(' ');
-            document.getElementById('processDirectory').textContent = process.directory;
-            document.getElementById('processDescription').textContent = process.description;
-            
-            // 添加状态样式
-            const statusElement = document.getElementById('processStatus');
-            statusElement.textContent = process.status;
-            statusElement.className = `status-${process.status}`;
-            
-            // 格式化时间
-            document.getElementById('processStartTime').textContent = formatDateTime(process.start_time);
-            document.getElementById('processEndTime').textContent = process.end_time ? formatDateTime(process.end_time) : '-';
-            
-            // 显示退出代码
-            document.getElementById('processExitCode').textContent = process.exit_code !== null ? process.exit_code : '-';
-            
-            // 显示标签
-            document.getElementById('processLabels').textContent = process.labels && process.labels.length > 0 ? 
-                process.labels.join(', ') : '无';
-        }
-        
-        // 更新操作按钮
-        function updateActionButtons(process) {
-            const container = document.getElementById('actionButtonsContainer');
-            container.innerHTML = '';
-            
-            if (process.status === 'running') {
-                // 运行中的进程显示停止按钮
-                const stopButton = document.createElement('button');
-                stopButton.className = 'btn btn-stop';
-                stopButton.textContent = '停止进程';
-                stopButton.onclick = function() { stopProcess(); };
-                container.appendChild(stopButton);
-            } else {
-                // 已结束的进程显示清理按钮
-                const cleanButton = document.createElement('button');
-                cleanButton.className = 'btn btn-clean';
-                cleanButton.textContent = '清理进程';
-                cleanButton.onclick = function() { cleanProcess(); };
-                container.appendChild(cleanButton);
-            }
-        }
-        
-        // 刷新进程信息
-        function refreshProcess() {
-            loadProcessInfo();
-            refreshOutput();
-        }
-        
-        // 切换输出标签
-        function switchTab(tab) {
-            activeTab = tab;
-            
-            // 更新标签样式
-            document.querySelectorAll('.tab').forEach(el => el.classList.remove('active'));
-            document.querySelector(`.tab:nth-child(${tab === 'stdout' ? 1 : 2})`).classList.add('active');
-            
-            // 显示对应内容
-            document.getElementById('stdoutContent').style.display = tab === 'stdout' ? 'block' : 'none';
-            document.getElementById('stderrContent').style.display = tab === 'stderr' ? 'block' : 'none';
-        }
-        
-        // 刷新输出
-        function refreshOutput(showLoading = true) {
-            // 获取筛选参数
-            const tailLines = document.getElementById('tailLines').value;
-            const showStderr = document.getElementById('showStderr').checked;
-            
-            // 构建URL
-            let url = `/api/process/${processId}/output?`;
-            if (tailLines) {
-                url += `tail=${tailLines}&`;
-            }
-            if (showStderr) {
-                url += `stderr=true&`;
-            }
-            
-            // 显示加载中
-            if (showLoading) {
-                document.getElementById('stdoutContent').textContent = '加载中...';
-                document.getElementById('stderrContent').textContent = '加载中...';
-            }
-            
-            // 获取输出
-            fetch(url)
-                .then(response => {
-                    if (!response.ok) {
-                        throw new Error('获取输出失败');
-                    }
-                    return response.json();
-                })
-                .then(data => {
-                    // 显示标准输出
-                    displayOutput('stdoutContent', data.stdout);
+            $.ajax({
+                url: `/api/process/${pid}`,
+                method: "GET",
+                success: function(data) {
+                    $("#loadingInfo").addClass("hidden");
+                    $("#processInfo").removeClass("hidden");
                     
-                    // 显示错误输出
-                    displayOutput('stderrContent', data.stderr);
-                })
-                .catch(error => {
-                    console.error('获取进程输出失败:', error);
-                    document.getElementById('stdoutContent').textContent = '错误: ' + error.message;
-                    document.getElementById('stderrContent').textContent = '错误: ' + error.message;
-                });
+                    // Fill in process details
+                    $("#processTitle").text(`Process ${pid}`);
+                    
+                    // Status with color
+                    const status = data.status || "unknown";
+                    let statusHtml = `<span class="status-${status.toLowerCase()}">${status}</span>`;
+                    $("#status").html(statusHtml);
+                    
+                    // Command
+                    $("#command").text(data.command || "N/A");
+                    
+                    // Directory
+                    $("#directory").text(data.directory || "N/A");
+                    
+                    // Description
+                    $("#description").text(data.description || "N/A");
+                    
+                    // Labels
+                    if (data.labels && data.labels.length > 0) {
+                        let labelsHtml = '';
+                        data.labels.forEach(label => {
+                            labelsHtml += `<span class="badge bg-secondary">${label}</span>`;
+                        });
+                        $("#labels").html(labelsHtml);
+                    } else {
+                        $("#labels").text("None");
+                    }
+                    
+                    // Times
+                    $("#startTime").text(formatDateTime(data.start_time) || "N/A");
+                    $("#endTime").text(formatDateTime(data.end_time) || "N/A");
+                    
+                    // Exit code
+                    $("#exitCode").text(data.exit_code !== null ? data.exit_code : "N/A");
+                    
+                    // Show/hide buttons based on process status
+                    updateActionButtons(status);
+                },
+                error: function(xhr) {
+                    $("#loadingInfo").addClass("hidden");
+                    $("#processError")
+                        .removeClass("hidden")
+                        .text(`Error loading process information: ${xhr.responseJSON?.error || xhr.statusText}`);
+                }
+            });
         }
         
-        // 显示输出内容
-        function displayOutput(elementId, outputLines) {
-            const container = document.getElementById(elementId);
+        // Load process output
+        function loadProcessOutput() {
+            $("#loadingOutput").removeClass("hidden");
+            $("#outputContainer").addClass("hidden");
+            $("#outputError").addClass("hidden");
             
-            if (!outputLines || outputLines.length === 0) {
-                container.textContent = '无输出';
+            const showStdout = $("#showStdout").is(":checked");
+            const showStderr = $("#showStderr").is(":checked");
+            const tailLines = $("#tailLines").val();
+            
+            $.ajax({
+                url: `/api/process/${pid}/output`,
+                method: "GET",
+                data: {
+                    stdout: showStdout,
+                    stderr: showStderr,
+                    tail: tailLines
+                },
+                success: function(data) {
+                    $("#loadingOutput").addClass("hidden");
+                    $("#outputContainer").removeClass("hidden");
+                    
+                    // Process stdout
+                    if (showStdout) {
+                        const stdoutHtml = formatLogEntries(data.stdout);
+                        $("#stdout").html(stdoutHtml || '<p>No standard output available</p>');
+                        $("#stdoutContainer").removeClass("hidden");
+                    } else {
+                        $("#stdoutContainer").addClass("hidden");
+                    }
+                    
+                    // Process stderr
+                    if (showStderr) {
+                        const stderrHtml = formatLogEntries(data.stderr, true);
+                        $("#stderr").html(stderrHtml || '<p>No error output available</p>');
+                        $("#stderrContainer").removeClass("hidden");
+                    } else {
+                        $("#stderrContainer").addClass("hidden");
+                    }
+                    
+                    updateOutputVisibility();
+                },
+                error: function(xhr) {
+                    $("#loadingOutput").addClass("hidden");
+                    $("#outputError")
+                        .removeClass("hidden")
+                        .text(`Error loading process output: ${xhr.responseJSON?.error || xhr.statusText}`);
+                }
+            });
+        }
+        
+        // Stop process
+        function stopProcess(force) {
+            if (!confirm(`Are you sure you want to ${force ? 'force ' : ''}stop this process?`)) {
                 return;
             }
             
-            let content = '';
-            outputLines.forEach(line => {
-                const timestamp = formatDateTime(line.timestamp);
-                content += `[${timestamp}] ${line.text}\n`;
+            $.ajax({
+                url: `/api/process/${pid}/stop`,
+                method: "POST",
+                contentType: "application/json",
+                data: JSON.stringify({ force: force }),
+                success: function(data) {
+                    alert(`Process ${force ? 'force ' : ''}stopped successfully.`);
+                    loadProcessInfo();
+                    loadProcessOutput();
+                },
+                error: function(xhr) {
+                    alert(`Error stopping process: ${xhr.responseJSON?.error || xhr.statusText}`);
+                }
+            });
+        }
+        
+        // Clean process
+        function cleanProcess() {
+            if (!confirm("Are you sure you want to clean this process? This will remove all output logs.")) {
+                return;
+            }
+            
+            $.ajax({
+                url: `/api/process/${pid}/clean`,
+                method: "POST",
+                success: function(data) {
+                    alert("Process cleaned successfully.");
+                    // Redirect to process list
+                    window.location.href = "/";
+                },
+                error: function(xhr) {
+                    alert(`Error cleaning process: ${xhr.responseJSON?.error || xhr.statusText}`);
+                }
+            });
+        }
+        
+        // Format log entries
+        function formatLogEntries(entries, isError = false) {
+            if (!entries || entries.length === 0) {
+                return "";
+            }
+            
+            let html = "";
+            entries.forEach(entry => {
+                const timestamp = entry.timestamp ? new Date(entry.timestamp).toLocaleString() : "";
+                const logClass = isError ? "log-error" : "log-text";
+                
+                html += `<div class="log-entry">`;
+                if (timestamp) {
+                    html += `<span class="log-timestamp">[${timestamp}]</span> `;
+                }
+                html += `<span class="${logClass}">${escapeHtml(entry.text)}</span></div>`;
             });
             
-            container.textContent = content;
+            return html;
+        }
+        
+        // Format date/time
+        function formatDateTime(dateStr) {
+            if (!dateStr) return null;
+            return new Date(dateStr).toLocaleString();
+        }
+        
+        // Escape HTML to prevent XSS
+        function escapeHtml(text) {
+            if (!text) return "";
+            return text
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;")
+                .replace(/"/g, "&quot;")
+                .replace(/'/g, "&#039;");
+        }
+        
+        // Update output visibility based on checkboxes
+        function updateOutputVisibility() {
+            const showStdout = $("#showStdout").is(":checked");
+            const showStderr = $("#showStderr").is(":checked");
             
-            // 滚动到底部
-            container.scrollTop = container.scrollHeight;
-        }
-        
-        // 停止进程
-        function stopProcess() {
-            if (confirm('确定要停止此进程吗？')) {
-                fetch(`/api/process/${processId}/stop`, {
-                    method: 'POST'
-                })
-                .then(response => response.json())
-                .then(result => {
-                    alert(result.message || '进程已停止');
-                    refreshProcess();
-                })
-                .catch(error => {
-                    console.error('停止进程失败:', error);
-                    alert('停止进程失败');
-                });
+            if (showStdout) {
+                $("#stdoutContainer").removeClass("hidden");
+            } else {
+                $("#stdoutContainer").addClass("hidden");
+            }
+            
+            if (showStderr) {
+                $("#stderrContainer").removeClass("hidden");
+            } else {
+                $("#stderrContainer").addClass("hidden");
             }
         }
         
-        // 清理进程
-        function cleanProcess() {
-            if (confirm('确定要清理此进程吗？此操作不可撤销。')) {
-                fetch(`/api/process/${processId}/clean`, {
-                    method: 'POST'
-                })
-                .then(response => response.json())
-                .then(result => {
-                    alert(result.message || '进程已清理');
-                    window.location.href = '/';  // 清理后返回列表页
-                })
-                .catch(error => {
-                    console.error('清理进程失败:', error);
-                    alert('清理进程失败');
-                });
+        // Update action buttons based on process status
+        function updateActionButtons(status) {
+            const isRunning = status.toLowerCase() === "running";
+            
+            if (isRunning) {
+                $("#stopBtn, #forceStopBtn").prop("disabled", false);
+                $("#cleanBtn").prop("disabled", true);
+            } else {
+                $("#stopBtn, #forceStopBtn").prop("disabled", true);
+                $("#cleanBtn").prop("disabled", false);
             }
         }
         
-        // 格式化日期时间
-        function formatDateTime(isoString) {
-            if (!isoString) return '-';
-            const date = new Date(isoString);
-            return `${date.getFullYear()}-${padZero(date.getMonth() + 1)}-${padZero(date.getDate())} ${padZero(date.getHours())}:${padZero(date.getMinutes())}:${padZero(date.getSeconds())}`;
+        // Start auto-refresh
+        function startAutoRefresh() {
+            const seconds = parseInt($("#refreshRate").val());
+            if (refreshIntervalId) {
+                clearInterval(refreshIntervalId);
+            }
+            refreshIntervalId = setInterval(() => {
+                loadProcessInfo();
+                loadProcessOutput();
+            }, seconds * 1000);
         }
         
-        // 补零函数
-        function padZero(num) {
-            return num.toString().padStart(2, '0');
+        // Stop auto-refresh
+        function stopAutoRefresh() {
+            if (refreshIntervalId) {
+                clearInterval(refreshIntervalId);
+                refreshIntervalId = null;
+            }
         }
     </script>
 </body>

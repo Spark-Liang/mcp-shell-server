@@ -20,7 +20,7 @@ class TestBackgroundProcessManager(ProcessManagerTestBase):
         """测试启动进程并获取ID"""
         async with get_process_manager(self.create_manager) as process_manager:
             cmd = f"{sys.executable} {os.path.join(os.path.dirname(__file__), 'cmd_for_test.py')} echo Hello Background"
-            process_id = await process_manager.start_process(
+            pid = await process_manager.start_process(
                 shell_cmd=cmd,
                 directory=os.getcwd(),
                 description="测试进程",
@@ -28,11 +28,11 @@ class TestBackgroundProcessManager(ProcessManagerTestBase):
             )
             
             # 验证进程ID是否有效
-            assert process_id is not None
-            assert isinstance(process_id, str)
+            assert pid is not None
+            assert isinstance(pid, int)
             
             # 获取进程对象
-            bg_process = await process_manager.get_process(process_id)
+            bg_process = await process_manager.get_process(pid)
             assert bg_process is not None
             
             # 等待进程完成
@@ -49,7 +49,7 @@ class TestBackgroundProcessManager(ProcessManagerTestBase):
         async with get_process_manager(self.create_manager) as process_manager:
             # 创建一些进程
             cmd = f"{sys.executable} {os.path.join(os.path.dirname(__file__), 'cmd_for_test.py')} echo Test Process"
-            process_id1 = await process_manager.start_process(
+            pid1 = await process_manager.start_process(
                 shell_cmd=cmd,
                 directory=os.getcwd(),
                 description="Test process 1",
@@ -57,7 +57,7 @@ class TestBackgroundProcessManager(ProcessManagerTestBase):
             )
             
             cmd = f"{sys.executable} {os.path.join(os.path.dirname(__file__), 'cmd_for_test.py')} sleep 0.5"
-            process_id2 = await process_manager.start_process(
+            pid2 = await process_manager.start_process(
                 shell_cmd=cmd,
                 directory=os.getcwd(),
                 description="Test process 2",
@@ -65,7 +65,7 @@ class TestBackgroundProcessManager(ProcessManagerTestBase):
             )
             
             # 等待第一个进程完成
-            bg_process1 = await process_manager.get_process(process_id1)
+            bg_process1 = await process_manager.get_process(pid1)
             await asyncio.wait_for(bg_process1.wait(), timeout=5.0)
             
             # 测试按标签过滤
@@ -85,18 +85,18 @@ class TestBackgroundProcessManager(ProcessManagerTestBase):
         """测试获取进程输出"""
         async with get_process_manager(self.create_manager) as process_manager:
             cmd = f"{sys.executable} {os.path.join(os.path.dirname(__file__), 'cmd_for_test.py')} echo Output Test"
-            process_id = await process_manager.start_process(
+            pid = await process_manager.start_process(
                 shell_cmd=cmd,
                 directory=os.getcwd(),
                 description="Output test process",
             )
             
             # 等待进程完成
-            bg_process = await process_manager.get_process(process_id)
+            bg_process = await process_manager.get_process(pid)
             await asyncio.wait_for(bg_process.wait(), timeout=5.0)
             
             # 获取输出
-            output = await process_manager.get_process_output(process_id)
+            output = await process_manager.get_process_output(pid)
             
             # 验证输出
             assert len(output) > 0
@@ -108,16 +108,16 @@ class TestBackgroundProcessManager(ProcessManagerTestBase):
         async with get_process_manager(self.create_manager) as process_manager:
             # 创建一个长时间运行的进程
             cmd = f"{sys.executable} {os.path.join(os.path.dirname(__file__), 'cmd_for_test.py')} sleep 10"
-            process_id = await process_manager.start_process(
+            pid = await process_manager.start_process(
                 shell_cmd=cmd,
                 directory=os.getcwd(),
                 description="Long running process",
             )
             
             # 停止进程
-            result = await process_manager.stop_process(process_id)
+            result = await process_manager.stop_process(pid)
             assert result is True
             
             # 验证进程已停止
-            bg_process = await process_manager.get_process(process_id)
+            bg_process = await process_manager.get_process(pid)
             assert bg_process.status == ProcessStatus.TERMINATED 

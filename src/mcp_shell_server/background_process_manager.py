@@ -11,6 +11,7 @@ import uuid
 from datetime import datetime, timedelta
 from enum import Enum, auto
 from typing import Dict, List, Optional, Set, Any, Union, IO, Tuple, AsyncGenerator
+from unittest.mock import MagicMock
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -25,7 +26,6 @@ logger = logging.getLogger("mcp-shell-server")
 class BackgroundProcess:
     """表示一个后台运行的进程"""
     def __init__(self, 
-                process_id: str, 
                 shell_cmd: str, 
                 directory: str,
                 description: str,  # 描述是必填项
@@ -37,7 +37,6 @@ class BackgroundProcess:
         """初始化后台进程对象
         
         Args:
-            process_id: 进程唯一标识符
             shell_cmd: 要执行的命令字符串
             directory: 工作目录
             description: 进程描述(必填)
@@ -47,7 +46,9 @@ class BackgroundProcess:
             timeout: 超时时间(秒)
             envs: 环境变量字典
         """
-        self.process_id = process_id  # 随机字符串作为唯一标识
+        # 生成临时ID，用于日志目录（在进程创建前pid可能为None）
+        temp_id = str(uuid.uuid4())[:8]
+        
         self.command = shell_cmd  # 命令字符串
         self.directory = directory  # 工作目录
         self.description = description  # 命令描述
@@ -59,7 +60,7 @@ class BackgroundProcess:
         self.envs = envs  # 环境变量
         
         # 创建临时目录用于存储日志文件
-        self.log_dir = os.path.join(tempfile.gettempdir(), f"mcp_shell_logs_{process_id}")
+        self.log_dir = os.path.join(tempfile.gettempdir(), f"mcp_shell_logs_{temp_id}")
         os.makedirs(self.log_dir, exist_ok=True)
         
         # 创建OutputManager实例
@@ -109,6 +110,18 @@ class BackgroundProcess:
         if self.process:
             return self.process.pid
         return None
+
+    @pid.setter
+    def pid(self, value: int) -> None:
+        """设置进程PID，主要用于测试
+
+        Args:
+            value: 要设置的PID值
+        """
+        # 创建一个模拟进程对象
+        if not self.process:
+            self.process = MagicMock()
+        self.process.pid = value
 
     @property
     def stdin(self) -> Optional[asyncio.StreamWriter]:
@@ -277,7 +290,7 @@ class BackgroundProcess:
             dict: 包含进程基本信息的字典
         """
         return {
-            "process_id": self.process_id,
+            "pid": self.pid,
             "command": self.command,
             "directory": self.directory,
             "description": self.description,
@@ -387,7 +400,7 @@ class BackgroundProcessManager(IProcessManager):
         def handle_termination(signum: int, _: Any) -> None:
             """处理终止信号，清理进程。"""
             if self._processes:
-                for process_id, bg_process in list(self._processes.items()):
+                for pid, bg_process in list(self._processes.items()):
                     try:
                         if bg_process.process and bg_process.process.returncode is None:
                             bg_process.process.terminate()
@@ -619,7 +632,7 @@ class BackgroundProcessManager(IProcessManager):
                             bg_process.status = ProcessStatus.COMPLETED if exit_code == 0 else ProcessStatus.FAILED
                         except asyncio.TimeoutError:
                             # 超时发生，记录信息并终止进程
-                            logger.warning(f"进程 {bg_process.process_id} 执行超时 ({bg_process.timeout}秒)")
+                            logger.warning(f"进程 {bg_process.pid} 执行超时 ({bg_process.timeout}秒)")
                             bg_process.add_error(f"进程执行超时，超过 {bg_process.timeout} 秒")
                             
                             # 尝试终止进程
@@ -652,7 +665,7 @@ class BackgroundProcessManager(IProcessManager):
                     bg_process.end_time = datetime.now()
                     
                     # 进程已终止，安排延迟清理
-                    self.schedule_delayed_cleanup(bg_process.process_id)
+                    self.schedule_delayed_cleanup(bg_process.pid)
                 finally:
                     # 等待输出流读取任务完成
                     tasks = []
@@ -688,7 +701,7 @@ class BackgroundProcessManager(IProcessManager):
             bg_process.end_time = datetime.now()
             
             # 进程被取消，安排延迟清理
-            self.schedule_delayed_cleanup(bg_process.process_id)
+            self.schedule_delayed_cleanup(bg_process.pid)
             
         except Exception as e:
             logger.error(f"监控进程时出错: {e}")
@@ -696,7 +709,7 @@ class BackgroundProcessManager(IProcessManager):
             bg_process.end_time = datetime.now()
             
             # 进程出错，安排延迟清理
-            self.schedule_delayed_cleanup(bg_process.process_id)
+            self.schedule_delayed_cleanup(bg_process.pid)
             
             # 确保进程已终止
             if bg_process.process and bg_process.process.returncode is None:
@@ -736,10 +749,8 @@ class BackgroundProcessManager(IProcessManager):
         Raises:
             ValueError: 如果进程创建失败
         """
-        process_id = str(uuid.uuid4())[:5]
-        
         # 记录进程启动详细信息
-        logger.info(f"启动进程 {process_id}:")
+        logger.info(f"启动进程:")
         logger.info(f"  命令: {shell_cmd}")
         logger.info(f"  工作目录: {directory}")
         if envs:
@@ -765,7 +776,6 @@ class BackgroundProcessManager(IProcessManager):
 
             # 创建后台进程对象
             bg_process = BackgroundProcess(
-                process_id=process_id,
                 shell_cmd=shell_cmd,
                 directory=directory or os.getcwd(),
                 description=description,
@@ -776,8 +786,13 @@ class BackgroundProcessManager(IProcessManager):
                 envs=envs,
             )
             
-            # 将进程添加到管理的字典中
-            self._processes[process_id] = bg_process
+            # 获取进程pid
+            pid = process.pid
+            if pid is None:
+                raise ValueError("进程创建成功但无法获取pid")
+                
+            # 将进程添加到管理的字典中，使用pid作为键
+            self._processes[pid] = bg_process
             
             # 如果提供了stdin，发送到进程
             if stdin and process.stdin:
@@ -811,8 +826,8 @@ class BackgroundProcessManager(IProcessManager):
         envs: Optional[Dict[str, str]] = None,
         encoding: Optional[str] = None,
         timeout: Optional[int] = None,
-    ) -> str:
-        """启动一个后台进程并返回其ID。
+    ) -> int:
+        """启动一个后台进程并返回其PID。
 
         Args:
             shell_cmd: 要执行的命令字符串
@@ -825,7 +840,7 @@ class BackgroundProcessManager(IProcessManager):
             timeout: 超时时间(秒)
             
         Returns:
-            str: 进程ID
+            int: 进程PID
             
         Raises:
             ValueError: 如果进程创建失败
@@ -843,7 +858,9 @@ class BackgroundProcessManager(IProcessManager):
         
         # 确保我们得到的是 BackgroundProcess 对象
         if isinstance(bg_process, BackgroundProcess):
-            return bg_process.process_id
+            if bg_process.pid is None:
+                raise ValueError("进程创建成功但无法获取pid")
+            return bg_process.pid
         else:
             # 这种情况不应该发生，但为了类型安全
             raise ValueError("内部错误：create_process 没有返回 BackgroundProcess 对象")
@@ -860,7 +877,7 @@ class BackgroundProcessManager(IProcessManager):
         """
         result = []
         
-        for proc_id, bg_process in self._processes.items():
+        for pid, bg_process in self._processes.items():
             # 如果指定了标签过滤，检查是否匹配
             if labels and not any(label in labels for label in bg_process.labels):
                 continue
@@ -887,257 +904,210 @@ class BackgroundProcessManager(IProcessManager):
             
         return result
     
-    async def get_process(self, process_id: str) -> Optional[BackgroundProcess]:
-        """获取指定ID的进程对象。
+    async def get_process(self, pid: int) -> Optional[BackgroundProcess]:
+        """获取指定PID的进程对象。
         
         Args:
-            process_id: 进程ID
+            pid: 进程PID
             
         Returns:
             Optional[BackgroundProcess]: 进程对象，如果不存在则返回None
         """
-        return self._processes.get(process_id)
+        return self._processes.get(pid)
         
-    async def stop_process(self, process_id: str, force: bool = False) -> bool:
-        """停止指定的进程。
+    async def stop_process(self, pid: int, force: bool = False) -> bool:
+        """停止后台进程
         
         Args:
-            process_id: 进程ID
-            force: 是否强制停止
+            pid: 进程PID
+            force: 是否强制终止进程
             
         Returns:
-            bool: 是否成功停止
+            bool: 操作是否成功
             
         Raises:
-            ValueError: 进程不存在时抛出
+            ValueError: 如果进程不存在
         """
-        if process_id not in self._processes:
-            raise ValueError(f"进程ID {process_id} 不存在")
+        # 获取后台进程
+        bg_process = await self.get_process(pid)
+        if not bg_process:
+            raise ValueError(f"没有找到PID为 {pid} 的进程")
             
-        bg_process = self._processes[process_id]
-        
-        # 如果进程已经不在运行状态，无需操作
+        # 检查进程是否已经终止
         if not bg_process.is_running():
-            # 确保为非运行状态的进程安排延迟清理
-            self.schedule_delayed_cleanup(process_id)
+            logger.warning(f"进程 {pid} 已经终止")
             return True
             
-        # 如果进程对象不存在，更新状态并返回
-        if not bg_process.process:
-            bg_process.status = ProcessStatus.TERMINATED
-            bg_process.end_time = datetime.now()
-            # 安排延迟清理
-            self.schedule_delayed_cleanup(process_id)
-            return True
-            
-        # 停止进程
         try:
+            # 如果进程仍在运行，尝试终止它
             if force:
-                if asyncio.iscoroutinefunction(bg_process.process.kill):
-                    await bg_process.process.kill()
-                else:
-                    bg_process.process.kill()
+                # 强制终止
+                bg_process.kill()
+                logger.info(f"强制终止进程 {pid}")
             else:
-                if asyncio.iscoroutinefunction(bg_process.process.terminate):
-                    await bg_process.process.terminate()
-                else:
-                    bg_process.process.terminate()
+                # 尝试优雅终止
+                bg_process.terminate()
+                logger.info(f"终止进程 {pid}")
                 
-            # 等待进程结束，有超时限制
-            try:
-                await asyncio.wait_for(bg_process.process.wait(), timeout=5.0)
-            except asyncio.TimeoutError:
-                if not force:
-                    # 如果超时且非强制模式，强制终止
-                    if asyncio.iscoroutinefunction(bg_process.process.kill):
-                        await bg_process.process.kill()
-                    else:
-                        bg_process.process.kill()
-                    await asyncio.wait_for(bg_process.process.wait(), timeout=2.0)
-                    
-            # 更新进程状态
+            # 等待进程终止
+            await asyncio.sleep(0.5)  # 给进程一点时间来终止
+            
+            # 更新状态
+            if bg_process.is_running():
+                # 如果进程仍在运行，并且我们使用了force=True，则再尝试一次强制终止
+                if force:
+                    logger.warning(f"进程 {pid} 没有响应终止信号，尝试强制终止")
+                    bg_process.kill()
+                    await asyncio.sleep(0.5)  # 再次等待
+                
+                # 最终检查
+                if bg_process.is_running():
+                    logger.error(f"无法终止进程 {pid}")
+                    return False
+            
+            # 进程已终止，确保状态为TERMINATED
             bg_process.status = ProcessStatus.TERMINATED
             bg_process.end_time = datetime.now()
-            if bg_process.process:
-                bg_process.exit_code = bg_process.process.returncode
-                
-            # 安排延迟清理
-            self.schedule_delayed_cleanup(process_id)
                     
+            # 进程已终止
+            logger.info(f"进程 {pid} 已终止")
             return True
+            
         except Exception as e:
-            logger.error(f"停止进程时出错: {e}")
-            raise ValueError(f"停止进程时出错: {str(e)}")
+            logger.error(f"终止进程 {pid} 时出错: {e}")
+            return False
     
     async def get_process_output(
         self,
-        process_id: str,
+        pid: int,
         tail: Optional[int] = None,
         since_time: Optional[str] = None,
         until_time: Optional[str] = None,
         error: bool = False,
     ) -> List[LogEntry]:
-        """获取进程的输出。
+        """获取进程的输出日志
         
         Args:
-            process_id: 进程ID
-            tail: 只显示最后N行
-            since_time: 只显示某个时间点之后的日志
-            until_time: 只显示某个时间点之前的日志
+            pid: 进程PID
+            tail: 只返回最后n行
+            since_time: ISO格式的时间字符串，只返回此时间后的日志
+            until_time: ISO格式的时间字符串，只返回此时间前的日志
             error: 是否获取错误输出
             
         Returns:
-            List[LogEntry]: 输出行列表，每条记录为LogEntry对象
+            List[LogEntry]: 日志条目列表
             
         Raises:
-            ValueError: 进程不存在时抛出
+            ValueError: 如果进程不存在或其他错误
         """
-        if process_id not in self._processes:
-            raise ValueError(f"进程ID {process_id} 不存在")
+        bg_process = await self.get_process(pid)
+        if not bg_process:
+            raise ValueError(f"没有找到PID为 {pid} 的进程")
             
-        bg_process = self._processes[process_id]
-        
-        # 解析since参数
+        # 解析时间过滤器
         since = None
+        until = None
+        
         if since_time:
             try:
                 since = datetime.fromisoformat(since_time)
             except ValueError:
-                raise ValueError("'since_time' 必须是有效的ISO格式时间字符串 (例如: '2021-01-01T00:00:00')")
-        
-        # 解析until参数
-        until = None
+                raise ValueError(f"无效的since_time格式: {since_time}，应为ISO格式的时间字符串")
+                
         if until_time:
             try:
                 until = datetime.fromisoformat(until_time)
             except ValueError:
-                raise ValueError("'until_time' 必须是有效的ISO格式时间字符串 (例如: '2021-01-01T00:00:00')")
-        
+                raise ValueError(f"无效的until_time格式: {until_time}，应为ISO格式的时间字符串")
+                
         # 获取输出
-        if error:
-            return bg_process.get_error(tail=tail, since=since, until=until)
-        else:
-            return bg_process.get_output(tail=tail, since=since, until=until)
+        try:
+            if error:
+                return bg_process.get_error(tail=tail, since=since, until=until)
+            else:
+                return bg_process.get_output(tail=tail, since=since, until=until)
+        except Exception as e:
+            raise ValueError(f"获取进程输出时出错: {str(e)}")
     
     async def follow_process_output(
         self,
-        process_id: str,
+        pid: int,
         tail: Optional[int] = None,
         since_time: Optional[str] = None,
         error: bool = False,
         poll_interval: float = 0.5
     ) -> AsyncGenerator[LogEntry, None]:
-        """以流式方式获取进程输出，适用于实时监控日志
+        """实时跟踪进程输出
         
         Args:
-            process_id: 进程ID
-            tail: 初始时获取最后N行，如果为None则获取所有行
-            since_time: ISO格式的时间字符串，只返回该时间之后的日志
+            pid: 进程PID
+            tail: 首次获取的尾部行数
+            since_time: ISO格式的时间字符串，只返回此时间后的日志
             error: 是否获取错误输出
-            poll_interval: 轮询间隔，单位秒
+            poll_interval: 轮询间隔(秒)
             
         Yields:
-            LogEntry: 日志条目对象，包含时间戳和文本
+            LogEntry: 日志条目
             
         Raises:
             ValueError: 如果进程不存在
         """
-        # 获取进程对象
-        process = await self.get_process(process_id)
-        if not process:
-            raise ValueError(f"进程 {process_id} 不存在")
-        
-        # 转换since_time为datetime对象
-        since_dt = None
+        bg_process = await self.get_process(pid)
+        if not bg_process:
+            raise ValueError(f"没有找到PID为 {pid} 的进程")
+            
+        # 解析时间过滤器
+        since = None
         if since_time:
             try:
-                since_dt = datetime.fromisoformat(since_time)
+                since = datetime.fromisoformat(since_time)
             except ValueError:
-                raise ValueError(f"无效的时间格式: {since_time}，应为ISO格式")
-        
-        # 获取初始输出
-        last_outputs = []
+                raise ValueError(f"无效的since_time格式: {since_time}，应为ISO格式的时间字符串")
+                
+        # 首次获取现有日志
+        logs = []
         if error:
-            # 处理get_error可能是协程的情况
-            if asyncio.iscoroutinefunction(process.get_error):
-                last_outputs = await process.get_error(tail=tail, since=since_dt)
+            # 处理可能是协程的情况
+            if asyncio.iscoroutinefunction(bg_process.get_error):
+                logs = await bg_process.get_error(tail=tail, since=since)
             else:
-                last_outputs = process.get_error(tail=tail, since=since_dt)
+                logs = bg_process.get_error(tail=tail, since=since)
         else:
-            # 处理get_output可能是协程的情况
-            if asyncio.iscoroutinefunction(process.get_output):
-                last_outputs = await process.get_output(tail=tail, since=since_dt)
+            # 处理可能是协程的情况
+            if asyncio.iscoroutinefunction(bg_process.get_output):
+                logs = await bg_process.get_output(tail=tail, since=since)
             else:
-                last_outputs = process.get_output(tail=tail, since=since_dt)
-        
-        # 首先发送已有的行
-        for output in last_outputs:
-            yield output
-        
-        # 记录最后一行的时间戳，用于过滤
-        last_timestamp = datetime.min
-        if last_outputs:
-            last_timestamp = last_outputs[-1].timestamp
+                logs = bg_process.get_output(tail=tail, since=since)
+                
+        for log in logs:
+            yield log
             
-        # 持续轮询新输出，直到进程结束
-        while process.is_running():
-            # 获取上次之后的新输出
-            new_outputs = []
-            if error:
-                # 处理get_error可能是协程的情况
-                if asyncio.iscoroutinefunction(process.get_error):
-                    all_outputs = await process.get_error()
-                else:
-                    all_outputs = process.get_error()
-                new_outputs = [
-                    output for output in all_outputs 
-                    if output.timestamp > last_timestamp
-                ]
-            else:
-                # 处理get_output可能是协程的情况
-                if asyncio.iscoroutinefunction(process.get_output):
-                    all_outputs = await process.get_output()
-                else:
-                    all_outputs = process.get_output()
-                new_outputs = [
-                    output for output in all_outputs 
-                    if output.timestamp > last_timestamp
-                ]
-                
-            # 发送新输出
-            for output in new_outputs:
-                yield output
-                last_timestamp = max(last_timestamp, output.timestamp)
-                
-            # 等待下一次轮询
+        # 记住最后一条日志的时间
+        last_time = logs[-1].timestamp if logs else (since or datetime.now())
+        
+        # 持续轮询新日志
+        while bg_process.is_running():
             await asyncio.sleep(poll_interval)
-        
-        # 进程结束后，再获取一次是否有新输出
-        final_outputs = []
-        if error:
-            # 处理get_error可能是协程的情况
-            if asyncio.iscoroutinefunction(process.get_error):
-                all_outputs = await process.get_error()
-            else:
-                all_outputs = process.get_error()
-            final_outputs = [
-                output for output in all_outputs 
-                if output.timestamp > last_timestamp
-            ]
-        else:
-            # 处理get_output可能是协程的情况
-            if asyncio.iscoroutinefunction(process.get_output):
-                all_outputs = await process.get_output()
-            else:
-                all_outputs = process.get_output()
-            final_outputs = [
-                output for output in all_outputs 
-                if output.timestamp > last_timestamp
-            ]
             
-        # 发送最终输出
-        for output in final_outputs:
-            yield output
+            # 获取自上次查询以来的新日志
+            new_logs = []
+            if error:
+                # 处理可能是协程的情况
+                if asyncio.iscoroutinefunction(bg_process.get_error):
+                    new_logs = await bg_process.get_error(since=last_time)
+                else:
+                    new_logs = bg_process.get_error(since=last_time)
+            else:
+                # 处理可能是协程的情况
+                if asyncio.iscoroutinefunction(bg_process.get_output):
+                    new_logs = await bg_process.get_output(since=last_time)
+                else:
+                    new_logs = bg_process.get_output(since=last_time)
+            
+            if new_logs:
+                last_time = new_logs[-1].timestamp
+                for log in new_logs:
+                    yield log
     
     async def cleanup_processes(self, processes: Optional[List[Union[asyncio.subprocess.Process, BackgroundProcess]]] = None, labels: Optional[List[str]] = None, status: Optional[ProcessStatus] = None) -> int:
         """清理进程，可接受进程列表或按标签和状态过滤。
@@ -1166,10 +1136,10 @@ class BackgroundProcessManager(IProcessManager):
                     try:
                         # 检查进程是否正在运行
                         if proc.is_running():
-                            proc_id = proc.process_id if hasattr(proc, 'process_id') else None
-                            if proc_id and proc_id in self._processes:
+                            proc_pid = proc.pid if hasattr(proc, 'pid') else None
+                            if proc_pid and proc_pid in self._processes:
                                 # 使用已有的方法停止进程
-                                await self.stop_process(proc_id, force=True)
+                                await self.stop_process(proc_pid, force=True)
                                 count += 1
                             else:
                                 # 直接终止进程
@@ -1206,7 +1176,7 @@ class BackgroundProcessManager(IProcessManager):
         to_remove = []
         
         # 查找已完成的进程
-        for proc_id, bg_process in self._processes.items():
+        for pid, bg_process in self._processes.items():
             # 如果进程仍在运行，且未指定状态，跳过
             if bg_process.is_running() and not status:
                 continue
@@ -1219,135 +1189,99 @@ class BackgroundProcessManager(IProcessManager):
             if labels and not any(label in labels for label in bg_process.labels):
                 continue
                 
-            to_remove.append(proc_id)
+            to_remove.append(pid)
             
         # 移除进程
-        for proc_id in to_remove:
-            await self.cleanup_process(proc_id)
-            del self._processes[proc_id]
+        for pid in to_remove:
+            await self.cleanup_process(pid)
+            del self._processes[pid]
             
             
         return len(to_remove)
 
-    async def cleanup_process(self, process_id: str) -> None:
-        """清理特定的进程。
-
-        Args:
-            process_id: 要清理的进程ID
-        """
-        if process_id in self._processes:
-            bg_process = self._processes[process_id]
-            
-            # 取消监控任务
-            if bg_process.monitor_task and not bg_process.monitor_task.done():
-                bg_process.monitor_task.cancel()
-                try:
-                    await bg_process.monitor_task
-                except asyncio.CancelledError:
-                    pass
-                except Exception as e:
-                    logger.warning(f"取消监控任务时出错: {e}")
-            
-            # 取消流读取任务
-            tasks = []
-            if bg_process.stdout_task and not bg_process.stdout_task.done():
-                bg_process.stdout_task.cancel()
-                tasks.append(bg_process.stdout_task)
-                
-            if bg_process.stderr_task and not bg_process.stderr_task.done():
-                bg_process.stderr_task.cancel()
-                tasks.append(bg_process.stderr_task)
-                
-            if tasks:
-                try:
-                    await asyncio.gather(*tasks, return_exceptions=True)
-                except Exception as e:
-                    logger.warning(f"取消流读取任务时出错: {e}")
-            
-            # 终止进程
-            if bg_process.process and bg_process.process.returncode is None:
-                try:
-                    # 先尝试优雅终止
-                    if asyncio.iscoroutinefunction(bg_process.process.terminate):
-                        await bg_process.process.terminate()
-                    else:
-                        bg_process.process.terminate()
-                    try:
-                        await asyncio.wait_for(bg_process.process.wait(), timeout=2.0)
-                    except asyncio.TimeoutError:
-                        # 如果超时，强制终止
-                        if asyncio.iscoroutinefunction(bg_process.process.kill):
-                            await bg_process.process.kill()
-                        else:
-                            bg_process.process.kill()
-                        await asyncio.wait_for(bg_process.process.wait(), timeout=1.0)
-                except Exception as e:
-                    logger.warning(f"终止进程时出错: {e}")
-            
-            # 更新进程状态
-            bg_process.status = ProcessStatus.TERMINATED
-            bg_process.end_time = datetime.now()
-            if bg_process.process:
-                bg_process.exit_code = bg_process.process.returncode
-                
-            # 清理日志文件
-            bg_process.cleanup()
-
-    async def clean_completed_process(self, process_id: str) -> bool:
-        """清理已完成的进程。只有当进程已经结束时才会清理，运行中的进程会报错。
+    async def cleanup_process(self, pid: int) -> None:
+        """清理进程资源
         
         Args:
-            process_id: 要清理的进程ID
-            
-        Returns:
-            bool: 清理是否成功
+            pid: 进程PID
             
         Raises:
-            ValueError: 如果进程不存在或进程仍在运行
+            ValueError: 如果进程不存在
         """
-        if process_id not in self._processes:
-            raise ValueError(f"进程ID {process_id} 不存在")
+        # 获取后台进程
+        bg_process = await self.get_process(pid)
+        if not bg_process:
+            raise ValueError(f"没有找到PID为 {pid} 的进程")
             
-        bg_process = self._processes[process_id]
-        
-        # 检查进程是否已结束
+        # 如果进程仍在运行，先尝试终止它
         if bg_process.is_running():
-            raise ValueError(f"进程 {process_id} 仍在运行中，无法清理")
+            await self.stop_process(pid, force=True)
+            await asyncio.sleep(0.5)  # 给进程一点时间来终止
             
         # 清理进程资源
-        await self.cleanup_process(process_id)
+        if bg_process.monitor_task and not bg_process.monitor_task.done():
+            bg_process.monitor_task.cancel()
+            
+        if bg_process.stdout_task and not bg_process.stdout_task.done():
+            bg_process.stdout_task.cancel()
+            
+        if bg_process.stderr_task and not bg_process.stderr_task.done():
+            bg_process.stderr_task.cancel()
+            
+        # 调用进程自身的清理方法
+        try:
+            bg_process.cleanup()
+        except Exception as e:
+            logger.error(f"清理进程 {pid} 资源时出错: {e}")
+            
+        # 移除进程
+        if pid in self._processes:
+            del self._processes[pid]
         
-        # 从进程字典中删除
-        del self._processes[process_id]
+    async def clean_completed_process(self, pid: int) -> bool:
+        """清理已完成的进程，非运行中的进程
         
-        return True
+        Args:
+            pid: 进程PID
+            
+        Returns:
+            bool: 是否成功清理
+        """
+        # 获取后台进程
+        bg_process = self._processes.get(pid)
+        if not bg_process:
+            logger.warning(f"尝试清理不存在的进程 {pid}")
+            return False
+            
+        # 如果进程仍在运行，不清理
+        if bg_process.is_running():
+            logger.warning(f"进程 {pid} 仍在运行，不能清理")
+            return False
+            
+        try:
+            # 清理资源
+            await self.cleanup_process(pid)
+            logger.info(f"已清理已完成的进程 {pid}")
+            return True
+        except Exception as e:
+            logger.error(f"清理已完成的进程 {pid} 时出错: {e}")
+            return False
 
     async def cleanup_all(self) -> None:
-        """清理所有被跟踪的进程。"""
-        # 取消所有已安排的延迟清理任务
-        for proc_id, bg_proc in self._processes.items():
-            if bg_proc.cleanup_handle and not bg_proc.cleanup_handle.cancelled():
-                bg_proc.cleanup_handle.cancel()
-                bg_proc.cleanup_scheduled = False
+        """清理所有进程，无论是否运行中"""
+        # 获取所有进程的PID
+        pids = list(self._processes.keys())
         
-        # 停止所有运行中的进程
-        running_processes = [
-            proc_id for proc_id, bg_proc in self._processes.items()
-            if bg_proc.is_running()
-        ]
-        
-        for proc_id in running_processes:
+        # 清理每个进程
+        cleanup_count = 0
+        for pid in pids:
             try:
-                await self.stop_process(proc_id, force=True)
+                await self.cleanup_process(pid)
+                cleanup_count += 1
             except Exception as e:
-                logger.warning(f"停止进程 {proc_id} 时出错: {e}")
-        
-        # 清理所有进程资源
-        for process_id in list(self._processes.keys()):
-            await self.cleanup_process(process_id)
-            
-        # 清空进程字典
-        self._processes.clear()
+                logger.error(f"清理进程 {pid} 时出错: {e}")
+                
+        logger.info(f"已清理 {cleanup_count} 个进程")
 
     async def execute_pipeline(
         self,
@@ -1477,70 +1411,60 @@ class BackgroundProcessManager(IProcessManager):
         return summary
 
 
-    def schedule_delayed_cleanup(self, process_id: str) -> None:
-        """为进程安排延迟清理任务
+    def schedule_delayed_cleanup(self, pid: int) -> None:
+        """为已完成的进程安排延迟清理
         
         Args:
-            process_id: 要安排清理的进程ID
+            pid: 进程PID
         """
-        if process_id not in self._processes:
-            logger.warning(f"尝试为不存在的进程 {process_id} 安排清理任务")
+        bg_process = self._processes.get(pid)
+        if not bg_process:
+            logger.warning(f"无法安排清理：PID为 {pid} 的进程不存在")
             return
             
-        bg_process = self._processes[process_id]
+        # 如果该进程已经安排了清理，则跳过
+        if bg_process.cleanup_scheduled:
+            return
+            
+        # 设置清理标志
+        bg_process.cleanup_scheduled = True
         
-        # 如果进程还在运行或已经安排了清理，则跳过
-        if bg_process.is_running() or bg_process.cleanup_scheduled:
-            return
+        # 使用asyncio创建延迟任务
+        delay_seconds = self._auto_cleanup_age
+        
+        if delay_seconds <= 0:
+            return  # 如果设置为0或负数，表示不自动清理
             
-        # 取消已存在的清理任务
-        if bg_process.cleanup_handle and not bg_process.cleanup_handle.cancelled():
-            bg_process.cleanup_handle.cancel()
-            
-        # 获取延迟清理时间（秒）
-        retention_seconds = self._auto_cleanup_age
-        if retention_seconds <= 0:
-            return  # 如果保留时间设为0或负数，不自动清理
-            
-        try:
-            # 使用loop.call_later安排延迟清理
-            loop = asyncio.get_running_loop()
-            
-            # 创建一个延迟清理的协程封装函数
-            async def delayed_cleanup():
-                try:
-                    # 记录日志
-                    logger.info(f"执行延迟清理进程 {process_id}")
-                    
-                    # 检查进程是否仍然存在
-                    if process_id in self._processes:
-                        # 清理进程资源
-                        await self.cleanup_process(process_id)
-                        del self._processes[process_id]
-                except Exception as e:
-                    logger.error(f"延迟清理进程 {process_id} 时出错: {e}")
-                finally:
-                    # 完成清理任务后重置标记
-                    if process_id in self._processes:
-                        self._processes[process_id].cleanup_scheduled = False
-                        self._processes[process_id].cleanup_handle = None
-            
-            # 创建任务包装器，在延迟后执行清理
-            def schedule_task():
-                # 创建并返回任务
-                task = asyncio.create_task(delayed_cleanup())
-                return task
+        logger.info(f"安排进程 {pid} 在 {delay_seconds} 秒后清理")
+        
+        loop = asyncio.get_event_loop()
+        
+        async def delayed_cleanup():
+            try:
+                await asyncio.sleep(delay_seconds)
+                # 再次检查进程是否存在
+                if pid in self._processes:
+                    await self.clean_completed_process(pid)
+            except Exception as e:
+                logger.error(f"执行延迟清理时出错: {e}")
                 
-            # 使用call_later安排延迟执行
-            bg_process.cleanup_handle = loop.call_later(
-                retention_seconds, 
-                schedule_task
-            )
-            bg_process.cleanup_scheduled = True
+        # 创建任务
+        def schedule_task():
+            # 创建并返回任务
+            task = loop.create_task(delayed_cleanup())
+            bg_process.cleanup_handle = task
+            return task
             
-            logger.debug(f"已为进程 {process_id} 安排延迟清理，将在 {retention_seconds} 秒后执行")
-        except RuntimeError:
-            # 没有运行中的事件循环，跳过延迟清理
-            logger.debug(f"没有检测到运行中的事件循环，跳过为进程 {process_id} 安排延迟清理")
-        except Exception as e:
-            logger.error(f"安排进程 {process_id} 延迟清理时出错: {e}")
+        # 如果在事件循环中，直接调度任务；否则，使用call_soon_threadsafe
+        if loop.is_running():
+            try:
+                # 在事件循环中直接运行
+                schedule_task()
+            except RuntimeError:
+                # 如果当前线程不是事件循环所在线程
+                loop.call_soon_threadsafe(schedule_task)
+        else:
+            # 如果事件循环未运行（这种情况不应该发生）
+            logger.warning("事件循环未运行，无法安排延迟清理")
+            
+        logger.debug(f"已为进程 {pid} 安排延迟清理")

@@ -584,7 +584,7 @@ class ShellExecutor:
         envs: Optional[Dict[str, str]] = None, 
         encoding: Optional[str] = None,
         labels: Optional[List[str]] = None,
-    ) -> str:
+    ) -> int:
         """
         Execute a shell command asynchronously and return the process ID.
 
@@ -659,33 +659,28 @@ class ShellExecutor:
         """
         return await self.process_manager.list_processes(labels=labels, status=status)
 
-    async def get_process(self, pid: str = None, process_id: str = None) -> Optional[Union[asyncio.subprocess.Process, ExtendedProcess]]:
+    async def get_process(self, pid: int) -> Optional[Union[asyncio.subprocess.Process, ExtendedProcess]]:
         """
         Get a process by its PID.
         
         Args:
-            pid: Process ID (deprecated, use process_id instead)
-            process_id: Process ID
+            pid: Process ID
 
         Returns:
             Process object, or None if not found
         """
-        # 优先使用process_id
-        actual_id = process_id if process_id is not None else pid
-        return await self.process_manager.get_process(actual_id)
+        return await self.process_manager.get_process(pid)
 
     async def stop_process(
         self, 
-        pid: str = None, 
-        process_id: str = None,
+        pid: int,
         force: bool = False
     ) -> bool:
         """
         Stop a process by its PID.
         
         Args:
-            pid: Process ID (deprecated, use process_id instead)
-            process_id: Process ID
+            pid: Process ID
             force: If True, forcefully stop the process
 
         Returns:
@@ -694,14 +689,11 @@ class ShellExecutor:
         Raises:
             ValueError: If process is not found
         """
-        # 优先使用process_id
-        actual_id = process_id if process_id is not None else pid
-        return await self.process_manager.stop_process(actual_id, force=force)
+        return await self.process_manager.stop_process(pid, force=force)
 
     async def get_process_output(
         self, 
-        pid: str = None, 
-        process_id: str = None,
+        pid: int,
         tail: Optional[int] = None, 
         since: Optional[datetime] = None, 
         until: Optional[datetime] = None, 
@@ -711,8 +703,7 @@ class ShellExecutor:
         Get the output of a process.
 
         Args:
-            pid: Process ID (deprecated, use process_id instead)
-            process_id: Process ID
+            pid: Process ID
             tail: Number of lines to return from the end of the output
             since: Return only output since this timestamp
             until: Return only output until this timestamp
@@ -721,30 +712,25 @@ class ShellExecutor:
         Returns:
             A list of LogEntry objects
         """
-        # 优先使用process_id
-        actual_id = process_id if process_id is not None else pid
         return await self.process_manager.get_process_output(
-            pid=actual_id, 
+            pid=pid, 
             tail=tail,
             since_time=since.isoformat() if since else None,
             until_time=until.isoformat() if until else None,
             error=error
         )
         
-    async def clean_completed_process(self, pid: str = None, process_id: str = None) -> None:
+    async def clean_completed_process(self, pid: int) -> None:
         """
         Clean up a completed process, removing it from the process manager.
         
         Args:
-            pid: Process ID (deprecated, use process_id instead)
-            process_id: Process ID to clean up
+            pid: Process ID to clean up
             
         Raises:
             ValueError: If the process is not found or is still running
         """
-        # 优先使用process_id
-        actual_id = process_id if process_id is not None else pid
-        return await self.process_manager.clean_completed_process(actual_id)
+        return await self.process_manager.clean_completed_process(pid)
 
 
 # 创建全局默认实例供其他模块使用

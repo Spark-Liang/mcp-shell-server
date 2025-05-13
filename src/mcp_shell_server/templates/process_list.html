@@ -167,38 +167,23 @@
             }
             
             processes.forEach(process => {
-                const tr = document.createElement('tr');
-                
-                // 格式化命令显示
-                let cmdText = process.command.join(' ');
-                if (cmdText.length > 30) {
-                    cmdText = cmdText.substring(0, 27) + '...';
-                }
-                
-                // 格式化时间显示
-                const startTime = formatDateTime(process.start_time);
-                const endTime = process.end_time ? formatDateTime(process.end_time) : '-';
-                
-                // 添加状态样式类
-                const statusClass = `status-${process.status}`;
-                
-                tr.innerHTML = `
-                    <td>${process.process_id.substring(0, 8)}</td>
-                    <td title="${process.command.join(' ')}">${cmdText}</td>
-                    <td>${process.description}</td>
-                    <td class="${statusClass}">${process.status}</td>
-                    <td>${startTime}</td>
-                    <td>${endTime}</td>
-                    <td class="actions">
-                        <button class="btn btn-view" onclick="viewProcess('${process.process_id}')">查看</button>
-                        ${process.status === 'running' ? 
-                            `<button class="btn btn-stop" onclick="stopProcess('${process.process_id}')">停止</button>` : 
-                            `<button class="btn btn-clean" onclick="cleanProcess('${process.process_id}')">清理</button>`
-                        }
-                    </td>
+                let statusClass = 'status-' + process.status.toLowerCase();
+                let row = `
+                    <tr>
+                        <td>${process.pid}</td>
+                        <td>${process.command || 'N/A'}</td>
+                        <td>${process.description || 'N/A'}</td>
+                        <td class="${statusClass}">${process.status}</td>
+                        <td>${formatDateTime(process.start_time)}</td>
+                        <td>
+                            <button class="btn btn-view" onclick="viewProcess(${process.pid})">查看</button>
+                            ${process.status === 'RUNNING' ? 
+                            `<button class="btn btn-stop" onclick="stopProcess(${process.pid})">停止</button>` :
+                            `<button class="btn btn-clean" onclick="cleanProcess(${process.pid})">清理</button>`}
+                        </td>
+                    </tr>
                 `;
-                
-                processList.appendChild(tr);
+                processList.innerHTML += row;
             });
         }
         
