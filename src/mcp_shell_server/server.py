@@ -13,7 +13,8 @@ from mcp.types import TextContent, Tool, ImageContent, EmbeddedResource
 from .version import __version__
 from .interfaces import ToolHandler
 from .exec_tool_handler import ExecuteToolHandler
-from .bg_tool_handlers import bg_tool_handlers, background_process_manager
+from .bg_tool_handlers import bg_tool_handlers
+from .shell_executor import default_shell_executor
 from . import background_process_manager_web as web_server
 
 # Configure logging
@@ -203,7 +204,7 @@ async def _cleanup_background_processes() -> None:
     """清理后台进程"""
     try:
         logger.info("Cleaning up background processes...")
-        await background_process_manager.cleanup_all()
+        await default_shell_executor.process_manager.cleanup_all()
         logger.info("Background process cleanup completed.")
     except Exception as cleanup_error:
         logger.error(f"Error during background process cleanup: {cleanup_error}")

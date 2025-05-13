@@ -89,7 +89,7 @@ async def test_start_process(bg_process_manager, cleanup_bg_processes):
     
     # 模拟进程创建
     create_process_mock = AsyncMock()
-    mock_bg_process = MagicMock()
+    mock_bg_process = AsyncMock(spec=BackgroundProcess)
     mock_bg_process.process_id = "test-process-id"
     create_process_mock.return_value = mock_bg_process
     

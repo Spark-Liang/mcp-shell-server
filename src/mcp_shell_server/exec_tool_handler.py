@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 from mcp.types import TextContent
 
 from .interfaces import ToolHandler
-from .shell_executor import ShellExecutor
+from .shell_executor import default_shell_executor
 
 # 配置日志
 logger = logging.getLogger("mcp-shell-server")
@@ -63,7 +63,7 @@ class ExecuteToolHandler(ToolHandler[ShellExecuteArgs]):
         return ShellExecuteArgs
 
     def __init__(self):
-        self.executor = ShellExecutor()
+        self.executor = default_shell_executor
 
     def get_allowed_commands(self) -> list[str]:
         """Get the allowed commands"""

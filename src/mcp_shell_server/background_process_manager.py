@@ -708,28 +708,30 @@ class BackgroundProcessManager(IProcessManager):
     async def create_process(
         self,
         shell_cmd: str,
-        directory: str,
-        description: str = "Default process description",  # 添加默认值
-        labels: Optional[List[str]] = None,
+        directory: Optional[str],
         stdin: Optional[str] = None,
+        stdout_handle: Any = asyncio.subprocess.PIPE,
         envs: Optional[Dict[str, str]] = None,
         encoding: Optional[str] = None,
         timeout: Optional[int] = None,
-    ) -> BackgroundProcess:
+        description: str = "Default process description",
+        labels: Optional[List[str]] = None,
+    ) -> Union[asyncio.subprocess.Process, BackgroundProcess]:
         """创建一个新的后台进程。
 
         Args:
             shell_cmd: 要执行的命令字符串
             directory: 工作目录
-            description: 进程描述
-            labels: 进程标签列表
             stdin: 传递给进程的输入
+            stdout_handle: 标准输出处理（为兼容 ProcessManager，但在后台进程中不使用）
             envs: 额外的环境变量
             encoding: 输出编码
             timeout: 超时时间（秒）
+            description: 进程描述
+            labels: 进程标签列表
 
         Returns:
-            BackgroundProcess: 创建的后台进程对象
+            Union[asyncio.subprocess.Process, BackgroundProcess]: 创建的后台进程对象
 
         Raises:
             ValueError: 如果进程创建失败
@@ -755,7 +757,7 @@ class BackgroundProcessManager(IProcessManager):
             process = await asyncio.create_subprocess_shell(
                 shell_cmd,
                 stdin=asyncio.subprocess.PIPE,
-                stdout=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,  # 后台进程总是使用PIPE，忽略stdout_handle参数
                 stderr=asyncio.subprocess.PIPE,
                 env={**os.environ, **(envs or {})},
                 cwd=directory,
@@ -765,13 +767,13 @@ class BackgroundProcessManager(IProcessManager):
             bg_process = BackgroundProcess(
                 process_id=process_id,
                 shell_cmd=shell_cmd,
-                directory=directory,
+                directory=directory or os.getcwd(),
                 description=description,
                 labels=labels,
                 process=process,
                 encoding=encoding,
-                timeout=timeout,  # 传递超时参数
-                envs=envs,  # 传递环境变量
+                timeout=timeout,
+                envs=envs,
             )
             
             # 将进程添加到管理的字典中
@@ -839,7 +841,12 @@ class BackgroundProcessManager(IProcessManager):
             timeout=timeout,
         )
         
-        return bg_process.process_id
+        # 确保我们得到的是 BackgroundProcess 对象
+        if isinstance(bg_process, BackgroundProcess):
+            return bg_process.process_id
+        else:
+            # 这种情况不应该发生，但为了类型安全
+            raise ValueError("内部错误：create_process 没有返回 BackgroundProcess 对象")
         
     async def list_processes(self, labels: Optional[List[str]] = None, status: Optional[ProcessStatus] = None) -> List[ProcessInfo]:
         """列出进程，可按标签和状态过滤。

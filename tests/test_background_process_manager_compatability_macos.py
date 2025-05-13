@@ -40,7 +40,8 @@ def get_process_status(pid: int) -> str:
 async def test_zombie_process_cleanup(process_manager):
     """Test that background processes don't become zombies."""
     cmd = ["sh", "-c", "sleep 0.5 & wait"]
-    process = await process_manager.start_process(cmd)
+    pid = await process_manager.start_process(cmd)
+    process = await process_manager.get_process(pid)
 
     # Wait for the background process to finish
     await asyncio.sleep(1)
@@ -90,8 +91,11 @@ async def test_multiple_process_cleanup(process_manager):
     """Test cleanup of multiple processes."""
     # Start multiple background processes
     # Start multiple processes in parallel
-    processes = await asyncio.gather(
+    pids = await asyncio.gather(
         *[process_manager.start_process(["sleep", "2"]) for _ in range(3)]
+    )
+    processes = await asyncio.gather(
+        *[process_manager.get_process(pid) for pid in pids]
     )
 
     # Give them a moment to start

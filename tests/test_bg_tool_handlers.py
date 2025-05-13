@@ -18,7 +18,6 @@ from mcp_shell_server.bg_tool_handlers import (
     ListBackgroundProcessesToolHandler,
     StopBackgroundProcessToolHandler,
     GetBackgroundProcessOutputToolHandler,
-    background_process_manager,
 )
 
 
@@ -78,20 +77,20 @@ def test_list_processes_args_validation():
 
 def test_stop_process_args_validation():
     """测试StopProcessArgs参数验证"""
-    args = StopProcessArgs(pid="test123")
-    assert args.pid == "test123"
+    args = StopProcessArgs(process_id="test123")
+    assert args.process_id == "test123"
     assert args.force is False
     
-    args = StopProcessArgs(pid="test123", force=True)
-    assert args.pid == "test123"
+    args = StopProcessArgs(process_id="test123", force=True)
+    assert args.process_id == "test123"
     assert args.force is True
 
 
 def test_get_process_output_args_validation():
     """测试GetProcessOutputArgs参数验证"""
     # 基本参数
-    args = GetProcessOutputArgs(pid="test123")
-    assert args.pid == "test123"
+    args = GetProcessOutputArgs(process_id="test123")
+    assert args.process_id == "test123"
     assert args.tail is None
     assert args.since is None
     assert args.until is None
@@ -105,7 +104,7 @@ def test_get_process_output_args_validation():
     one_hour_ago = now - timedelta(hours=1)
     
     args = GetProcessOutputArgs(
-        pid="test123",
+        process_id="test123",
         tail=10,
         since=one_hour_ago,
         until=now,
@@ -114,7 +113,7 @@ def test_get_process_output_args_validation():
         add_time_prefix=False,
         time_prefix_format="%H:%M:%S"
     )
-    assert args.pid == "test123"
+    assert args.process_id == "test123"
     assert args.tail == 10
     assert args.since == one_hour_ago
     assert args.until == now
@@ -125,7 +124,7 @@ def test_get_process_output_args_validation():
     
     # 字符串日期转换
     args = GetProcessOutputArgs(
-        pid="test123",
+        process_id="test123",
         since="2021-01-01T12:00:00",
         until="2021-01-02T12:00:00"
     )
@@ -135,20 +134,20 @@ def test_get_process_output_args_validation():
     # 无效的日期格式
     with pytest.raises(ValidationError, match="must be a valid ISO format"):
         GetProcessOutputArgs(
-            pid="test123",
+            process_id="test123",
             since="invalid-date"
         )
     
     with pytest.raises(ValidationError, match="must be a valid ISO format"):
         GetProcessOutputArgs(
-            pid="test123",
+            process_id="test123",
             until="invalid-date"
         )
     
     # tail必须大于0
     with pytest.raises(ValidationError, match="Input should be greater than 0"):
         GetProcessOutputArgs(
-            pid="test123",
+            process_id="test123",
             tail=0
         )
 
@@ -171,15 +170,15 @@ async def test_get_process_output_tool_handler():
         LogEntry(timestamp=now, text="Test output")
     ]
     
-    # 模拟background_process_manager
-    with patch("mcp_shell_server.bg_tool_handlers.background_process_manager") as mock_manager:
+    # 模拟default_shell_executor
+    with patch("mcp_shell_server.bg_tool_handlers.default_shell_executor") as mock_executor:
         # 将方法变为异步模拟
-        mock_manager.get_process = AsyncMock(return_value=mock_process)
-        mock_manager.get_process_output = AsyncMock(return_value=output_data)
+        mock_executor.get_process = AsyncMock(return_value=mock_process)
+        mock_executor.get_process_output = AsyncMock(return_value=output_data)
         
         # 测试标准输出
         args = GetProcessOutputArgs(
-            pid="test123",
+            process_id="test123",
             since=datetime.now() - timedelta(hours=1),
             with_stdout=True,
             with_stderr=False
@@ -191,17 +190,17 @@ async def test_get_process_output_tool_handler():
         assert "stdout" in result[1].text  # 第二个是标准输出内容
         
         # 验证调用
-        mock_manager.get_process_output.assert_called_once()
-        call_args = mock_manager.get_process_output.call_args[1]
-        assert call_args["pid"] == "test123"
-        assert call_args["since_time"] is not None  # 时间转换为ISO格式
+        mock_executor.get_process_output.assert_called_once()
+        call_args = mock_executor.get_process_output.call_args[1]
+        assert call_args["process_id"] == "test123"
+        assert call_args["since"] is not None  # 时间参数存在
         assert call_args["error"] is False
         
         # 测试错误输出
-        mock_manager.get_process_output.reset_mock()
+        mock_executor.get_process_output.reset_mock()
         
         args = GetProcessOutputArgs(
-            pid="test123",
+            process_id="test123",
             with_stdout=False,
             with_stderr=True
         )
@@ -212,16 +211,16 @@ async def test_get_process_output_tool_handler():
         assert "stderr" in result[1].text  # 第二个是错误输出内容
         
         # 验证调用
-        mock_manager.get_process_output.assert_called_once()
-        call_args = mock_manager.get_process_output.call_args[1]
-        assert call_args["pid"] == "test123"
+        mock_executor.get_process_output.assert_called_once()
+        call_args = mock_executor.get_process_output.call_args[1]
+        assert call_args["process_id"] == "test123"
         assert call_args["error"] is True
         
         # 测试同时获取标准输出和错误输出
-        mock_manager.get_process_output.reset_mock()
+        mock_executor.get_process_output.reset_mock()
         
         args = GetProcessOutputArgs(
-            pid="test123",
+            process_id="test123",
             with_stdout=True,
             with_stderr=True
         )
@@ -235,13 +234,13 @@ async def test_get_process_output_tool_handler():
         
         # 验证调用
         # 现在会调用 get_process_output 两次，一次用于 stderr，一次用于 stdout
-        assert mock_manager.get_process_output.call_count == 2
+        assert mock_executor.get_process_output.call_count == 2
         
         # 测试无时间前缀
-        mock_manager.get_process_output.reset_mock()
+        mock_executor.get_process_output.reset_mock()
         
         args = GetProcessOutputArgs(
-            pid="test123",
+            process_id="test123",
             with_stdout=True,
             with_stderr=False,
             add_time_prefix=False

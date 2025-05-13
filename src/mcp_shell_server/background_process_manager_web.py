@@ -14,8 +14,11 @@ logger = logging.getLogger("mcp-shell-server")
 # 创建Flask应用
 app = Flask(__name__, template_folder="templates")
 
-# 全局后台进程管理器
-from .bg_tool_handlers import background_process_manager
+# 获取全局进程管理器
+from .shell_executor import default_shell_executor
+
+# 使用 ShellExecutor 的进程管理器实例
+process_manager = default_shell_executor.process_manager
 
 @app.route('/')
 def index():
@@ -39,7 +42,7 @@ def get_processes():
         status = request.args.get('status')
         
         processes = loop.run_until_complete(
-            background_process_manager.list_processes(
+            process_manager.list_processes(
                 labels=labels if labels else None,
                 status=status if status else None
             )
@@ -55,7 +58,7 @@ def get_process(process_id):
     asyncio.set_event_loop(loop)
     
     try:
-        process = loop.run_until_complete(background_process_manager.get_process(process_id))
+        process = loop.run_until_complete(process_manager.get_process(process_id))
         if not process:
             return jsonify({"error": "进程不存在"}), 404
         
@@ -78,14 +81,14 @@ def get_process_output(process_id):
         with_stderr = request.args.get('stderr', 'false').lower() == 'true'
         
         # 检查进程是否存在
-        process = loop.run_until_complete(background_process_manager.get_process(process_id))
+        process = loop.run_until_complete(process_manager.get_process(process_id))
         if not process:
             return jsonify({"error": "进程不存在"}), 404
             
         # 获取进程输出
         stdout = loop.run_until_complete(
-            background_process_manager.get_process_output(
-                process_id=process_id,
+            process_manager.get_process_output(
+                pid=process_id,
                 tail=tail,
                 since_time=since,
                 until_time=until,
@@ -97,8 +100,8 @@ def get_process_output(process_id):
         stderr = []
         if with_stderr:
             stderr = loop.run_until_complete(
-                background_process_manager.get_process_output(
-                    process_id=process_id,
+                process_manager.get_process_output(
+                    pid=process_id,
                     tail=tail,
                     since_time=since,
                     until_time=until,
@@ -129,17 +132,24 @@ def stop_process_api(process_id):
         force = request.json.get('force', False) if request.is_json else False
         
         # 获取进程信息（用于返回消息）
-        process = loop.run_until_complete(background_process_manager.get_process(process_id))
+        process = loop.run_until_complete(process_manager.get_process(process_id))
         if not process:
             return jsonify({"error": "进程不存在"}), 404
             
         # 检查进程是否正在运行
-        if not process.is_running():
+        is_running = False
+        if hasattr(process, 'is_running'):
+            is_running = process.is_running()
+        elif hasattr(process, 'process_info'):
+            status = process.process_info.status
+            is_running = status == 'running' or status.value == 'running' if hasattr(status, 'value') else False
+        
+        if not is_running:
             return jsonify({"message": "进程已经停止，无需再次停止"}), 200
         
         # 停止进程
         result = loop.run_until_complete(
-            background_process_manager.stop_process(process_id, force=force)
+            process_manager.stop_process(process_id, force=force)
         )
         
         return jsonify({
@@ -163,13 +173,13 @@ def clean_process_api(process_id):
     
     try:
         # 获取进程信息（用于返回消息）
-        process = loop.run_until_complete(background_process_manager.get_process(process_id))
+        process = loop.run_until_complete(process_manager.get_process(process_id))
         if not process:
             return jsonify({"error": "进程不存在"}), 404
             
         # 清理进程
         result = loop.run_until_complete(
-            background_process_manager.clean_completed_process(process_id)
+            process_manager.clean_completed_process(process_id)
         )
         
         return jsonify({
@@ -205,7 +215,7 @@ def batch_clean_processes():
         results = []
         for proc_id in process_ids:
             try:
-                process = loop.run_until_complete(background_process_manager.get_process(proc_id))
+                process = loop.run_until_complete(process_manager.get_process(proc_id))
                 if not process:
                     results.append({
                         "process_id": proc_id,
@@ -216,7 +226,7 @@ def batch_clean_processes():
                     
                 # 尝试清理进程
                 result = loop.run_until_complete(
-                    background_process_manager.clean_completed_process(proc_id)
+                    process_manager.clean_completed_process(proc_id)
                 )
                 
                 results.append({

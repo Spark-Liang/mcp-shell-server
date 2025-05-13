@@ -17,7 +17,7 @@ from .command_preprocessor import CommandPreProcessor
 from .command_validator import CommandValidator
 from .directory_manager import DirectoryManager
 from .io_redirection_handler import IORedirectionHandler
-from .process_manager import ProcessManager
+from .background_process_manager import BackgroundProcessManager
 from .interfaces import IProcessManager, ProcessInfo, ExtendedProcess, LogEntry, ProcessStatus
 from .env_name_const import COMSPEC, SHELL, DEFAULT_ENCODING
 
@@ -153,7 +153,7 @@ class ShellExecutor:
         self.io_handler = IORedirectionHandler()
         self.preprocessor = CommandPreProcessor()
         self.process_manager = (
-            process_manager if process_manager is not None else ProcessManager()
+            process_manager if process_manager is not None else BackgroundProcessManager()
         )
 
     def _validate_command(self, command: List[str]) -> None:
@@ -586,7 +586,7 @@ class ShellExecutor:
         labels: Optional[List[str]] = None,
     ) -> str:
         """
-        Execute a shell command asynchronously and return the output.
+        Execute a shell command asynchronously and return the process ID.
 
         Args:
             command: List of command arguments
@@ -601,7 +601,46 @@ class ShellExecutor:
         Returns:
             Process ID of the started process
         """
-        ...
+        try:
+            # 使用 preprocessor 预处理命令
+            preprocessed_command = self.preprocessor.preprocess_command(command)
+            cleaned_command = self.preprocessor.clean_command(preprocessed_command)
+            
+            # 验证命令和目录
+            if not cleaned_command:
+                raise ValueError("Empty command")
+                
+            self._validate_command(cleaned_command)
+            self._validate_directory(directory)
+
+            # 管道命令不支持
+            for token in cleaned_command:
+                self.validator.validate_no_shell_operators(token)
+            
+            # 如果未提供encoding，使用默认获取方法
+            if encoding is None:
+                encoding = self._get_default_encoding()
+                
+            # 创建命令字符串
+            shell_cmd = self.preprocessor.create_shell_command(cleaned_command)
+            
+            # 调用进程管理器创建后台进程
+            process_id = await self.process_manager.start_process(
+                shell_cmd=shell_cmd,
+                directory=directory,
+                description=description or "Command execution",
+                labels=labels,
+                stdin=stdin,
+                envs=envs,
+                encoding=encoding,
+                timeout=timeout
+            )
+            
+            return process_id
+            
+        except Exception as e:
+            # 处理异常
+            raise ValueError(f"Failed to start background process: {str(e)}")
     
     async def list_processes(
         self, 
@@ -609,66 +648,107 @@ class ShellExecutor:
         status: Optional[ProcessStatus] = None
     ) -> List[ProcessInfo]:
         """
-        List all running processes.
+        List all processes, optionally filtered by labels and status.
+
+        Args:
+            labels: Optional list of labels to filter by
+            status: Optional status to filter by
 
         Returns:
-            List of ProcessInfo objects representing all running processes
+            List of ProcessInfo objects
         """
-        ...
-    
-    async def get_process(self, pid: str) -> Optional[ExtendedProcess]:
+        return await self.process_manager.list_processes(labels=labels, status=status)
+
+    async def get_process(self, pid: str = None, process_id: str = None) -> Optional[Union[asyncio.subprocess.Process, ExtendedProcess]]:
         """
         Get a process by its PID.
         
         Args:
-            pid: Process ID
+            pid: Process ID (deprecated, use process_id instead)
+            process_id: Process ID
 
         Returns:
-            ExtendedProcess object representing the process, or None if not found
+            Process object, or None if not found
         """
-        ...
+        # 优先使用process_id
+        actual_id = process_id if process_id is not None else pid
+        return await self.process_manager.get_process(actual_id)
 
     async def stop_process(
         self, 
-        pid: str, force: bool = False
+        pid: str = None, 
+        process_id: str = None,
+        force: bool = False
     ) -> bool:
         """
         Stop a process by its PID.
         
         Args:
-            pid: Process ID
+            pid: Process ID (deprecated, use process_id instead)
+            process_id: Process ID
             force: If True, forcefully stop the process
 
         Returns:
-            True if the process was stopped successfully, False otherwise
+            True if process was stopped successfully
 
         Raises:
-            ValueError: If the process is not found
+            ValueError: If process is not found
         """
-        ...
-    
+        # 优先使用process_id
+        actual_id = process_id if process_id is not None else pid
+        return await self.process_manager.stop_process(actual_id, force=force)
+
     async def get_process_output(
         self, 
-        pid: str, 
-        tail: int = 100, 
+        pid: str = None, 
+        process_id: str = None,
+        tail: Optional[int] = None, 
         since: Optional[datetime] = None, 
         until: Optional[datetime] = None, 
         error: bool = False
-    ) -> List[Dict[str, List[LogEntry]]]:
+    ) -> List[LogEntry]:
         """
-        Get the output of a process by its PID.
+        Get the output of a process.
 
         Args:
-            pid: Process ID
+            pid: Process ID (deprecated, use process_id instead)
+            process_id: Process ID
             tail: Number of lines to return from the end of the output
-            since: Start time for filtering output
-            until: End time for filtering output
-            error: If True, return error output only
+            since: Return only output since this timestamp
+            until: Return only output until this timestamp
+            error: Whether to get stderr (True) or stdout (False)
 
         Returns:
-            List of dictionaries containing output lines, dictionary key is output stream type (stdout or stderr)
+            A list of LogEntry objects
         """
-        ...
+        # 优先使用process_id
+        actual_id = process_id if process_id is not None else pid
+        return await self.process_manager.get_process_output(
+            pid=actual_id, 
+            tail=tail,
+            since_time=since.isoformat() if since else None,
+            until_time=until.isoformat() if until else None,
+            error=error
+        )
+        
+    async def clean_completed_process(self, pid: str = None, process_id: str = None) -> None:
+        """
+        Clean up a completed process, removing it from the process manager.
+        
+        Args:
+            pid: Process ID (deprecated, use process_id instead)
+            process_id: Process ID to clean up
+            
+        Raises:
+            ValueError: If the process is not found or is still running
+        """
+        # 优先使用process_id
+        actual_id = process_id if process_id is not None else pid
+        return await self.process_manager.clean_completed_process(actual_id)
+
+
+# 创建全局默认实例供其他模块使用
+default_shell_executor = ShellExecutor()
     
     
     
