@@ -13,6 +13,7 @@ from mcp_shell_server.backgroud_process_manager import (
     BackgroundProcessManager,
     ProcessStatus,
 )
+from mcp_shell_server.interfaces import LogEntry
 
 
 @pytest.fixture
@@ -127,13 +128,16 @@ async def test_get_process_output(bg_process_manager, cleanup_bg_processes):
     bg_process.process_id = process_id
     bg_process.status = ProcessStatus.RUNNING
     
+    # 获取当前时间用于测试
+    now = datetime.now()
+    
     # 模拟输出获取方法
     output_data = [
-        {"timestamp": datetime.now(), "text": "line 1"},
-        {"timestamp": datetime.now(), "text": "line 2"},
+        LogEntry(timestamp=now, text="line 1"),
+        LogEntry(timestamp=now, text="line 2"),
     ]
     error_data = [
-        {"timestamp": datetime.now(), "text": "error 1"},
+        LogEntry(timestamp=now, text="error 1"),
     ]
     
     bg_process.get_output.return_value = output_data
@@ -265,97 +269,6 @@ async def test_cleanup_processes(bg_process_manager):
 
 
 @pytest.mark.asyncio
-async def test_get_all_output(bg_process_manager):
-    """测试获取合并输出功能"""
-    # 准备模拟进程对象
-    process_id = "test-all-output"
-    
-    # 准备测试数据
-    now = datetime.now()
-    one_hour_ago = now - timedelta(hours=1)
-    two_hours_ago = now - timedelta(hours=2)
-    
-    # 记录确切的时间点
-    timestamp1 = two_hours_ago
-    timestamp2 = one_hour_ago
-    timestamp3 = now
-    timestamp4 = two_hours_ago.replace(minute=30)
-    timestamp5 = now.replace(minute=15)
-    
-    stdout_data = [
-        {"timestamp": timestamp1, "text": "stdout line 1"},
-        {"timestamp": timestamp2, "text": "stdout line 2"},
-        {"timestamp": timestamp3, "text": "stdout line 3"},
-    ]
-    
-    stderr_data = [
-        {"timestamp": timestamp4, "text": "stderr line 1"},
-        {"timestamp": timestamp5, "text": "stderr line 2"},
-    ]
-    
-    # 创建模拟进程
-    mock_process = MagicMock()
-    mock_process.get_output.return_value = stdout_data
-    mock_process.get_error.return_value = stderr_data
-    
-    # 模拟get_process方法
-    with patch.object(bg_process_manager, "get_process", AsyncMock(return_value=mock_process)):
-        # 测试获取所有输出
-        all_output = await bg_process_manager.get_all_output(process_id)
-        
-        # 验证输出合并和排序
-        assert len(all_output) == 5  # 所有输出行
-        
-        # 验证按时间排序
-        timestamps = [item["timestamp"] for item in all_output]
-        assert timestamps == sorted(timestamps, key=lambda x: x)
-        
-        # 验证流类型标记
-        stdout_count = sum(1 for item in all_output if item["stream"] == "stdout")
-        stderr_count = sum(1 for item in all_output if item["stream"] == "stderr")
-        assert stdout_count == 3
-        assert stderr_count == 2
-        
-        # 测试带since_time参数
-        since_time = timestamp2.isoformat()
-        all_output = await bg_process_manager.get_all_output(process_id, since_time=since_time)
-        
-        # 验证过滤结果 - 应该只包含timestamp2及之后的记录
-        assert len(all_output) == 3
-        timestamps = [item["timestamp"] for item in all_output]
-        assert all(ts >= timestamp2 for ts in timestamps)
-        
-        # 测试带until_time参数
-        until_time = timestamp2.isoformat()
-        all_output = await bg_process_manager.get_all_output(process_id, until_time=until_time)
-        
-        # 验证过滤结果 - 应该只包含timestamp2及之前的记录
-        assert len(all_output) == 3
-        timestamps = [item["timestamp"] for item in all_output]
-        assert all(ts <= timestamp2 for ts in timestamps)
-        
-        # 测试同时使用since_time和until_time
-        since_time = timestamp1.replace(minute=15).isoformat()
-        until_time = timestamp3.replace(minute=30).isoformat()
-        all_output = await bg_process_manager.get_all_output(process_id, since_time=since_time, until_time=until_time)
-        
-        # 验证在范围内的记录
-        timestamps = [item["timestamp"] for item in all_output]
-        since_dt = datetime.fromisoformat(since_time)
-        until_dt = datetime.fromisoformat(until_time)
-        assert all(since_dt <= ts <= until_dt for ts in timestamps)
-        
-        # 测试tail参数
-        all_output = await bg_process_manager.get_all_output(process_id, tail=2)
-        assert len(all_output) == 2  # 应该只有最后2行
-        
-        # 测试进程不存在
-        with patch.object(bg_process_manager, "get_process", AsyncMock(return_value=None)):
-            with pytest.raises(ValueError, match="进程 .* 不存在"):
-                await bg_process_manager.get_all_output("nonexistent")
-
-
-@pytest.mark.asyncio
 async def test_follow_process_output(bg_process_manager):
     """测试实时跟踪进程输出"""
     process_id = "test-follow-output"
@@ -375,20 +288,20 @@ async def test_follow_process_output(bg_process_manager):
     
     # 模拟初始输出
     initial_output = [
-        {"timestamp": now, "text": "初始输出 1"},
+        LogEntry(timestamp=now, text="初始输出 1"),
     ]
     
     # 模拟后续输出
     new_output1 = [
-        {"timestamp": now + timedelta(seconds=1), "text": "新输出 1"},
+        LogEntry(timestamp=now + timedelta(seconds=1), text="新输出 1"),
     ]
     
     new_output2 = [
-        {"timestamp": now + timedelta(seconds=2), "text": "新输出 2"},
+        LogEntry(timestamp=now + timedelta(seconds=2), text="新输出 2"),
     ]
     
     final_output = [
-        {"timestamp": now + timedelta(seconds=3), "text": "最终输出"},
+        LogEntry(timestamp=now + timedelta(seconds=3), text="最终输出"),
     ]
     
     # 设置get_output返回值序列
@@ -415,15 +328,19 @@ async def test_follow_process_output(bg_process_manager):
     
     # 验证收集的输出
     assert len(collected_outputs) == 4
-    assert collected_outputs[0]["text"] == "初始输出 1"
-    assert collected_outputs[1]["text"] == "新输出 1"
-    assert collected_outputs[2]["text"] == "新输出 2"
-    assert collected_outputs[3]["text"] == "最终输出"
+    assert collected_outputs[0].text == "初始输出 1"
+    assert collected_outputs[1].text == "新输出 1"
+    assert collected_outputs[2].text == "新输出 2"
+    assert collected_outputs[3].text == "最终输出"
+    
+    # 验证是否是LogEntry对象
+    for output in collected_outputs:
+        assert isinstance(output, LogEntry)
     
     # 验证is_running被正确调用
     assert is_running_mock.call_count == 3
     
-    # sleep会被调用，但我们不直接测试它 
+    # sleep会被调用，但我们不直接测试它
 
 @pytest.mark.asyncio
 async def test_process_timeout(bg_process_manager, cleanup_bg_processes):

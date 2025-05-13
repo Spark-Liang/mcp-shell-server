@@ -1,20 +1,22 @@
-"""Background process management for shell command execution."""
+"""后台进程管理模块，用于创建、执行和管理后台进程。"""
 
 import asyncio
 import logging
 import os
 import signal
-import uuid
+import sys
 import tempfile
-from enum import Enum, auto
+import time
+import uuid
 from datetime import datetime, timedelta
+from enum import Enum, auto
 from typing import Dict, List, Optional, Set, Any, Union, IO, Tuple, AsyncGenerator
 
 from pydantic import BaseModel, Field, field_validator
 
-from mcp_shell_server.interfaces import IProcessManager, ProcessStatus
-from mcp_shell_server.output_manager import OutputManager
-from mcp_shell_server.env_name_const import PROCESS_RETENTION_SECONDS
+from .interfaces import LogEntry, ProcessInfo, ProcessStatus, IProcessManager, deprecated
+from .output_manager import OutputManager
+from .env_name_const import PROCESS_RETENTION_SECONDS
 
 logger = logging.getLogger("mcp-shell-server")
 
@@ -195,9 +197,9 @@ class BackgroundProcess:
             stdout_logs = self._stdout_logger.get_logs()
             stderr_logs = self._stderr_logger.get_logs()
             
-            # 将日志记录转换为字节字符串
-            stdout_bytes = "\n".join([log["text"] for log in stdout_logs]).encode(self.encoding)
-            stderr_bytes = "\n".join([log["text"] for log in stderr_logs]).encode(self.encoding)
+            # 将日志记录对象转换为字节字符串
+            stdout_bytes = "\n".join([log.text for log in stdout_logs]).encode(self.encoding)
+            stderr_bytes = "\n".join([log.text for log in stderr_logs]).encode(self.encoding)
             
             return stdout_bytes, stderr_bytes
             
@@ -298,7 +300,7 @@ class BackgroundProcess:
         # 使用OutputLogger添加日志
         self._stderr_logger.add_line(line)
     
-    def get_output(self, tail: Optional[int] = None, since: Optional[datetime] = None, until: Optional[datetime] = None) -> List[Dict[str, Any]]:
+    def get_output(self, tail: Optional[int] = None, since: Optional[datetime] = None, until: Optional[datetime] = None) -> List[LogEntry]:
         """获取标准输出
         
         Args:
@@ -307,12 +309,12 @@ class BackgroundProcess:
             until: 只返回指定时间之前的输出
             
         Returns:
-            输出列表
+            输出列表，每条记录为LogEntry对象
         """
         # 使用OutputLogger获取日志
         return self._stdout_logger.get_logs(tail=tail, since=since, until=until)
     
-    def get_error(self, tail: Optional[int] = None, since: Optional[datetime] = None, until: Optional[datetime] = None) -> List[Dict[str, Any]]:
+    def get_error(self, tail: Optional[int] = None, since: Optional[datetime] = None, until: Optional[datetime] = None) -> List[LogEntry]:
         """获取错误输出
         
         Args:
@@ -321,7 +323,7 @@ class BackgroundProcess:
             until: 只返回指定时间之前的输出
             
         Returns:
-            错误输出列表
+            错误输出列表，每条记录为LogEntry对象
         """
         # 使用OutputLogger获取日志
         return self._stderr_logger.get_logs(tail=tail, since=since, until=until)
@@ -779,7 +781,7 @@ class BackgroundProcessManager(IProcessManager):
         
         return bg_process.process_id
         
-    async def list_processes(self, labels: Optional[List[str]] = None, status: Optional[ProcessStatus] = None) -> List[Dict[str, Any]]:
+    async def list_processes(self, labels: Optional[List[str]] = None, status: Optional[ProcessStatus] = None) -> List[ProcessInfo]:
         """列出进程，可按标签和状态过滤。
         
         Args:
@@ -787,7 +789,7 @@ class BackgroundProcessManager(IProcessManager):
             status: 状态过滤条件
             
         Returns:
-            List[Dict]: 进程信息列表
+            List[ProcessInfo]: 进程信息列表
         """
         result = []
         
@@ -801,7 +803,20 @@ class BackgroundProcessManager(IProcessManager):
                 continue
                 
             # 添加进程信息到结果
-            result.append(bg_process.get_info())
+            process_info = ProcessInfo(
+                shell_cmd=bg_process.command,
+                directory=bg_process.directory,
+                envs=bg_process.envs,
+                timeout=bg_process.timeout,
+                encoding=bg_process.encoding,
+                description=bg_process.description,
+                labels=bg_process.labels,
+                start_time=bg_process.start_time,
+                end_time=bg_process.end_time,
+                status=bg_process.status,
+                exit_code=bg_process.exit_code
+            )
+            result.append(process_info)
             
         return result
     
@@ -894,7 +909,7 @@ class BackgroundProcessManager(IProcessManager):
         since_time: Optional[str] = None,
         until_time: Optional[str] = None,
         error: bool = False,
-    ) -> List[Dict[str, Any]]:
+    ) -> List[LogEntry]:
         """获取进程的输出。
         
         Args:
@@ -905,7 +920,7 @@ class BackgroundProcessManager(IProcessManager):
             error: 是否获取错误输出
             
         Returns:
-            List[Dict[str, Any]]: 输出行列表
+            List[LogEntry]: 输出行列表，每条记录为LogEntry对象
             
         Raises:
             ValueError: 进程不存在时抛出
@@ -937,88 +952,6 @@ class BackgroundProcessManager(IProcessManager):
         else:
             return bg_process.get_output(tail=tail, since=since, until=until)
     
-    async def get_all_output(
-        self,
-        process_id: str,
-        tail: Optional[int] = None,
-        since_time: Optional[str] = None,
-        until_time: Optional[str] = None,
-    ) -> List[Dict[str, Any]]:
-        """获取进程的所有输出（标准输出和错误输出合并）
-        
-        Args:
-            process_id: 进程ID
-            tail: 只返回最后N行，如果为None则返回所有行
-            since_time: ISO格式的时间字符串，只返回该时间之后的日志
-            until_time: ISO格式的时间字符串，只返回该时间之前的日志
-            
-        Returns:
-            包含时间戳、文本和流类型的字典列表
-        
-        Raises:
-            ValueError: 如果进程不存在
-        """
-        process = await self.get_process(process_id)
-        if not process:
-            raise ValueError(f"进程 {process_id} 不存在")
-        
-        # 转换since_time
-        since_dt = None
-        if since_time:
-            try:
-                since_dt = datetime.fromisoformat(since_time)
-            except ValueError:
-                raise ValueError(f"无效的时间格式: {since_time}，应为ISO格式")
-        
-        # 转换until_time
-        until_dt = None
-        if until_time:
-            try:
-                until_dt = datetime.fromisoformat(until_time)
-            except ValueError:
-                raise ValueError(f"无效的时间格式: {until_time}，应为ISO格式")
-        
-        # 获取标准输出和错误输出
-        stdout_output = process.get_output(tail=None, since=since_dt, until=until_dt)
-        stderr_output = process.get_error(tail=None, since=since_dt, until=until_dt)
-        
-        # 合并输出并按时间排序
-        combined = []
-        for item in stdout_output:
-            # 确保since_time过滤
-            if since_dt and item["timestamp"] < since_dt:
-                continue
-            # 确保until_time过滤
-            if until_dt and item["timestamp"] > until_dt:
-                continue
-            combined.append({
-                "timestamp": item["timestamp"],
-                "text": item["text"],
-                "stream": "stdout"
-            })
-        
-        for item in stderr_output:
-            # 确保since_time过滤
-            if since_dt and item["timestamp"] < since_dt:
-                continue
-            # 确保until_time过滤
-            if until_dt and item["timestamp"] > until_dt:
-                continue
-            combined.append({
-                "timestamp": item["timestamp"],
-                "text": item["text"],
-                "stream": "stderr"
-            })
-        
-        # 按时间戳排序
-        combined.sort(key=lambda x: x["timestamp"])
-        
-        # 应用tail限制（在排序后）
-        if tail is not None:
-            combined = combined[-tail:]
-            
-        return combined
-    
     async def follow_process_output(
         self,
         process_id: str,
@@ -1026,7 +959,7 @@ class BackgroundProcessManager(IProcessManager):
         since_time: Optional[str] = None,
         error: bool = False,
         poll_interval: float = 0.5
-    ) -> AsyncGenerator[Dict[str, Any], None]:
+    ) -> AsyncGenerator[LogEntry, None]:
         """以流式方式获取进程输出，适用于实时监控日志
         
         Args:
@@ -1037,7 +970,7 @@ class BackgroundProcessManager(IProcessManager):
             poll_interval: 轮询间隔，单位秒
             
         Yields:
-            包含时间戳和文本的字典
+            LogEntry: 日志条目对象，包含时间戳和文本
             
         Raises:
             ValueError: 如果进程不存在
@@ -1077,7 +1010,7 @@ class BackgroundProcessManager(IProcessManager):
         # 记录最后一行的时间戳，用于过滤
         last_timestamp = datetime.min
         if last_outputs:
-            last_timestamp = last_outputs[-1]["timestamp"]
+            last_timestamp = last_outputs[-1].timestamp
             
         # 持续轮询新输出，直到进程结束
         while process.is_running():
@@ -1091,7 +1024,7 @@ class BackgroundProcessManager(IProcessManager):
                     all_outputs = process.get_error()
                 new_outputs = [
                     output for output in all_outputs 
-                    if output["timestamp"] > last_timestamp
+                    if output.timestamp > last_timestamp
                 ]
             else:
                 # 处理get_output可能是协程的情况
@@ -1101,13 +1034,13 @@ class BackgroundProcessManager(IProcessManager):
                     all_outputs = process.get_output()
                 new_outputs = [
                     output for output in all_outputs 
-                    if output["timestamp"] > last_timestamp
+                    if output.timestamp > last_timestamp
                 ]
                 
             # 发送新输出
             for output in new_outputs:
                 yield output
-                last_timestamp = max(last_timestamp, output["timestamp"])
+                last_timestamp = max(last_timestamp, output.timestamp)
                 
             # 等待下一次轮询
             await asyncio.sleep(poll_interval)
@@ -1122,7 +1055,7 @@ class BackgroundProcessManager(IProcessManager):
                 all_outputs = process.get_error()
             final_outputs = [
                 output for output in all_outputs 
-                if output["timestamp"] > last_timestamp
+                if output.timestamp > last_timestamp
             ]
         else:
             # 处理get_output可能是协程的情况
@@ -1132,7 +1065,7 @@ class BackgroundProcessManager(IProcessManager):
                 all_outputs = process.get_output()
             final_outputs = [
                 output for output in all_outputs 
-                if output["timestamp"] > last_timestamp
+                if output.timestamp > last_timestamp
             ]
             
         # 发送最终输出

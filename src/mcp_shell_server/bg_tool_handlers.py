@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional, Sequence, Type, Union
 from mcp.types import TextContent
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from .interfaces import ToolHandler
+from .interfaces import ToolHandler, LogEntry
 from .backgroud_process_manager import (
     BackgroundProcessManager,
     ProcessStatus,
@@ -188,7 +188,7 @@ class ListBackgroundProcessesToolHandler(ToolHandler[ListProcessesArgs]):
 
 class StopProcessArgs(BaseModel):
     """停止进程的参数模型"""
-    process_id: str = Field(
+    pid: str = Field(
         description="ID of the process to stop",
     )
     force: Optional[bool] = Field(
@@ -199,7 +199,7 @@ class StopProcessArgs(BaseModel):
 
 class CleanProcessArgs(BaseModel):
     """清理进程的参数模型"""
-    process_ids: List[str] = Field(
+    pids: List[str] = Field(
         description="要清理的进程ID列表",
     )
 
@@ -220,14 +220,14 @@ class StopBackgroundProcessToolHandler(ToolHandler[StopProcessArgs]):
         return StopProcessArgs
         
     async def _do_run_tool(self, arguments: StopProcessArgs) -> Sequence[TextContent]:
-        process_id = arguments.process_id
+        pid = arguments.pid
         force = arguments.force
         
         try:
             # 获取进程信息（用于返回消息）
-            process = await background_process_manager.get_process(process_id)
+            process = await background_process_manager.get_process(pid)
             if not process:
-                raise ValueError(f"Process with ID {process_id} not found")
+                raise ValueError(f"Process with ID {pid} not found")
                 
             # 构建描述字符串
             cmd_str = " ".join(process.command)
@@ -235,11 +235,11 @@ class StopBackgroundProcessToolHandler(ToolHandler[StopProcessArgs]):
                 cmd_str = cmd_str[:27] + "..."
                 
             # 停止进程
-            await background_process_manager.stop_process(process_id, force)
+            await background_process_manager.stop_process(pid, force)
             
             return [TextContent(
                 type="text",
-                text=f"Process {process_id} has been {'forcefully terminated' if force else 'gracefully stopped'}\nCommand: {cmd_str}\nDescription: {process.description}"
+                text=f"Process {pid} has been {'forcefully terminated' if force else 'gracefully stopped'}\nCommand: {cmd_str}\nDescription: {process.description}"
             )]
         except ValueError as e:
             raise ValueError(str(e))
@@ -250,7 +250,7 @@ class StopBackgroundProcessToolHandler(ToolHandler[StopProcessArgs]):
 
 class GetProcessOutputArgs(BaseModel):
     """获取进程输出的参数模型"""
-    process_id: str = Field(
+    pid: str = Field(
         description="ID of the process to get output from",
     )
     tail: Optional[int] = Field(
@@ -325,7 +325,7 @@ class GetBackgroundProcessOutputToolHandler(ToolHandler[GetProcessOutputArgs]):
     
     def _format_process_output(
         self, 
-        output: List[Dict[str, Any]], 
+        output: List[LogEntry], 
         stream_name: str, 
         add_time_prefix: bool, 
         time_prefix_format: str
@@ -335,10 +335,10 @@ class GetBackgroundProcessOutputToolHandler(ToolHandler[GetProcessOutputArgs]):
             formatted_lines = []
             for line in output:
                 if add_time_prefix:
-                    timestamp = line["timestamp"].strftime(time_prefix_format)
-                    formatted_lines.append(f"[{timestamp}] {line['text']}")
+                    timestamp = line.timestamp.strftime(time_prefix_format)
+                    formatted_lines.append(f"[{timestamp}] {line.text}")
                 else:
-                    formatted_lines.append(line['text'])
+                    formatted_lines.append(line.text)
             
             line_count = len(formatted_lines)
             output_text = "\n".join(formatted_lines)
@@ -353,7 +353,7 @@ class GetBackgroundProcessOutputToolHandler(ToolHandler[GetProcessOutputArgs]):
             )
         
     async def _do_run_tool(self, arguments: GetProcessOutputArgs) -> Sequence[TextContent]:
-        process_id = arguments.process_id
+        pid = arguments.pid
         tail = arguments.tail
         since = arguments.since
         until = arguments.until
@@ -367,9 +367,9 @@ class GetBackgroundProcessOutputToolHandler(ToolHandler[GetProcessOutputArgs]):
         
         try:
             # 获取进程对象
-            process = await background_process_manager.get_process(process_id)
+            process = await background_process_manager.get_process(pid)
             if not process:
-                raise ValueError(f"Process with ID {process_id} not found")
+                raise ValueError(f"Process with ID {pid} not found")
                 
             # 获取命令描述
             cmd_str = " ".join(process.command)
@@ -377,7 +377,7 @@ class GetBackgroundProcessOutputToolHandler(ToolHandler[GetProcessOutputArgs]):
                 cmd_str = cmd_str[:47] + "..."
             
             # 添加进程信息作为第一个TextContent
-            status_info = f"**Process {process_id[:8]} (status: {process.status})**\n"
+            status_info = f"**Process {pid[:8]} (status: {process.status})**\n"
             status_info += f"Command: {cmd_str}\n"
             status_info += f"Description: {process.description}"
             
@@ -412,7 +412,7 @@ class GetBackgroundProcessOutputToolHandler(ToolHandler[GetProcessOutputArgs]):
             if with_stdout:
                 # 获取标准输出
                 stdout_output = await background_process_manager.get_process_output(
-                    process_id=process_id,
+                    pid=pid,
                     tail=tail,
                     since_time=since.isoformat() if since else None,
                     until_time=until.isoformat() if until else None,
@@ -429,7 +429,7 @@ class GetBackgroundProcessOutputToolHandler(ToolHandler[GetProcessOutputArgs]):
             # 如果需要查看错误输出
             if with_stderr:
                 stderr_output = await background_process_manager.get_process_output(
-                    process_id=process_id,
+                    pid=pid,
                     tail=tail,
                     since_time=since.isoformat() if since else None,
                     until_time=until.isoformat() if until else None,
@@ -469,29 +469,29 @@ class CleanBackgroundProcessToolHandler(ToolHandler[CleanProcessArgs]):
         return CleanProcessArgs
         
     async def _do_run_tool(self, arguments: CleanProcessArgs) -> Sequence[TextContent]:
-        process_ids = arguments.process_ids
+        pids = arguments.pids
         
         # 结果表格
         results = []
         
-        for proc_id in process_ids:
+        for pid in pids:
             try:
-                await background_process_manager.clean_completed_process(proc_id)
+                await background_process_manager.clean_completed_process(pid)
                 results.append({
-                    "process_id": proc_id,
+                    "process_id": pid,
                     "status": "SUCCESS",
                     "message": "Process cleaned successfully"
                 })
             except ValueError as e:
                 results.append({
-                    "process_id": proc_id,
+                    "process_id": pid,
                     "status": "FAILED",
                     "message": str(e)
                 })
             except Exception as e:
-                logger.error(f"Error cleaning process {proc_id}: {e}")
+                logger.error(f"Error cleaning process {pid}: {e}")
                 results.append({
-                    "process_id": proc_id,
+                    "process_id": pid,
                     "status": "ERROR",
                     "message": f"Unexpected error: {str(e)}"
                 })
@@ -514,7 +514,7 @@ class CleanBackgroundProcessToolHandler(ToolHandler[CleanProcessArgs]):
 
 class GetProcessDetailArgs(BaseModel):
     """获取进程详情的参数模型"""
-    process_id: str = Field(
+    pid: str = Field(
         description="ID of the process to get details for",
     )
 
@@ -535,19 +535,19 @@ class GetBackgroundProcessDetailToolHandler(ToolHandler[GetProcessDetailArgs]):
         return GetProcessDetailArgs
         
     async def _do_run_tool(self, arguments: GetProcessDetailArgs) -> Sequence[TextContent]:
-        process_id = arguments.process_id
+        pid = arguments.pid
         
         try:
             # 获取进程详情
-            process = await background_process_manager.get_process(process_id)
+            process = await background_process_manager.get_process(pid)
             if not process:
-                raise ValueError(f"Process with ID {process_id} not found")
+                raise ValueError(f"Process with ID {pid} not found")
                 
             # 获取进程信息
             process_info = process.get_info()
             
             # 格式化输出
-            lines = [f"### Process Details: {process_id}"]
+            lines = [f"### Process Details: {pid}"]
             lines.append("")
             
             # 基本信息
@@ -585,7 +585,7 @@ class GetBackgroundProcessDetailToolHandler(ToolHandler[GetProcessDetailArgs]):
             lines.append("")
             lines.append("#### Output Information")
             lines.append(f"- Use `shell_bg_logs` tool to view process output")
-            lines.append(f"- Example: `shell_bg_logs(process_id='{process_id}')`")
+            lines.append(f"- Example: `shell_bg_logs(pid='{pid}')`")
             
             return [TextContent(
                 type="text",

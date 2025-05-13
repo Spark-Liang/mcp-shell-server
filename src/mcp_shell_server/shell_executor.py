@@ -10,16 +10,16 @@ except ImportError:
 import shlex
 import time
 from typing import IO, Any, Dict, List, Optional, Union, Iterable, Set
-
+from datetime import datetime
 from pydantic import BaseModel, Field
 
-from mcp_shell_server.command_preprocessor import CommandPreProcessor
-from mcp_shell_server.command_validator import CommandValidator
-from mcp_shell_server.directory_manager import DirectoryManager
-from mcp_shell_server.io_redirection_handler import IORedirectionHandler
-from mcp_shell_server.process_manager import ProcessManager
-from mcp_shell_server.interfaces import IProcessManager
-from mcp_shell_server.env_name_const import COMSPEC, SHELL, DEFAULT_ENCODING
+from .command_preprocessor import CommandPreProcessor
+from .command_validator import CommandValidator
+from .directory_manager import DirectoryManager
+from .io_redirection_handler import IORedirectionHandler
+from .process_manager import ProcessManager
+from .interfaces import IProcessManager, ProcessInfo, ExtendedProcess, LogEntry, ProcessStatus
+from .env_name_const import COMSPEC, SHELL, DEFAULT_ENCODING
 
 
 class ShellCommandResponse(BaseModel):
@@ -456,6 +456,20 @@ class ShellExecutor:
         envs: Optional[Dict[str, str]] = None,
         encoding: Optional[str] = None,
     ) -> ShellCommandResponse:
+        """
+        Execute a shell command synchronously and return the output.
+
+        Args:
+            command: List of command arguments
+            directory: Directory where the command will be executed
+            stdin: Input to be passed to the command
+            timeout: Maximum time in seconds to wait for the command to complete
+            envs: Environment variables for the command
+            encoding: Character encoding for the command output
+        
+        Returns:
+            ShellCommandResponse object with command execution results
+        """
         start_time = time.time()
         process = None  # Initialize process variable
         
@@ -558,3 +572,103 @@ class ShellExecutor:
 
         # Fallback - should not normally reach here
         raise ShellExecutionError("Pipeline executed but produced no output")
+
+
+    async def async_execute(
+        self, 
+        command: List[str], 
+        directory: str, 
+        description: str = None,
+        stdin: Optional[str] = None, 
+        timeout: Optional[int] = None, 
+        envs: Optional[Dict[str, str]] = None, 
+        encoding: Optional[str] = None,
+        labels: Optional[List[str]] = None,
+    ) -> str:
+        """
+        Execute a shell command asynchronously and return the output.
+
+        Args:
+            command: List of command arguments
+            directory: Directory where the command will be executed
+            description: Description of the command
+            stdin: Input to be passed to the command
+            timeout: Maximum time in seconds to wait for the command to complete
+            envs: Environment variables for the command
+            encoding: Character encoding for the command output
+            labels: Labels for the command
+
+        Returns:
+            Process ID of the started process
+        """
+        ...
+    
+    async def list_processes(
+        self, 
+        labels: Optional[List[str]] = None, 
+        status: Optional[ProcessStatus] = None
+    ) -> List[ProcessInfo]:
+        """
+        List all running processes.
+
+        Returns:
+            List of ProcessInfo objects representing all running processes
+        """
+        ...
+    
+    async def get_process(self, pid: str) -> Optional[ExtendedProcess]:
+        """
+        Get a process by its PID.
+        
+        Args:
+            pid: Process ID
+
+        Returns:
+            ExtendedProcess object representing the process, or None if not found
+        """
+        ...
+
+    async def stop_process(
+        self, 
+        pid: str, force: bool = False
+    ) -> bool:
+        """
+        Stop a process by its PID.
+        
+        Args:
+            pid: Process ID
+            force: If True, forcefully stop the process
+
+        Returns:
+            True if the process was stopped successfully, False otherwise
+
+        Raises:
+            ValueError: If the process is not found
+        """
+        ...
+    
+    async def get_process_output(
+        self, 
+        pid: str, 
+        tail: int = 100, 
+        since: Optional[datetime] = None, 
+        until: Optional[datetime] = None, 
+        error: bool = False
+    ) -> List[Dict[str, List[LogEntry]]]:
+        """
+        Get the output of a process by its PID.
+
+        Args:
+            pid: Process ID
+            tail: Number of lines to return from the end of the output
+            since: Start time for filtering output
+            until: End time for filtering output
+            error: If True, return error output only
+
+        Returns:
+            List of dictionaries containing output lines, dictionary key is output stream type (stdout or stderr)
+        """
+        ...
+    
+    
+    

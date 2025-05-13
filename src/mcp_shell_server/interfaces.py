@@ -4,6 +4,7 @@ import json
 from typing import Any, Dict, List, Optional, Sequence, Type, Union, Generic, TypeVar, Protocol, Tuple, IO, AsyncGenerator
 from abc import ABC, abstractmethod
 from itertools import chain
+from functools import wraps
 
 from pydantic import BaseModel, ValidationError, Field
 from mcp.types import TextContent, Tool, ImageContent, EmbeddedResource
@@ -14,6 +15,16 @@ from datetime import datetime
 from enum import Enum
 
 T_ARGUMENTS = TypeVar('T_ARGUMENTS', bound=BaseModel)
+
+# 缺少的deprecated装饰器
+def deprecated(reason: str):
+    """装饰器，用于标记方法已废弃"""
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            return func(*args, **kwargs)
+        return wrapper
+    return decorator
 
 class ToolHandler(Generic[T_ARGUMENTS], ABC):
     """抽象基类，定义工具处理器接口"""
@@ -154,6 +165,12 @@ class ProcessInfo(BaseModel):
     status: ProcessStatus = Field(description="进程状态")
     exit_code: Optional[int] = Field(description="进程退出码")
 
+class LogEntry(BaseModel):
+    """日志条目模型，表示单条日志记录。"""
+    timestamp: datetime = Field(..., description="日志记录时间戳")
+    text: str = Field("", description="日志内容")
+    stream: Optional[str] = Field(None, description="日志流类型，如stdout或stderr")
+
 class ExtendedProcess(Protocol):
     """扩展的Process协议，包含标准Process方法和扩展方法"""
 
@@ -206,21 +223,6 @@ class ExtendedProcess(Protocol):
 class IProcessManager(Protocol):
 
     @abstractmethod
-    async def start_process(
-        self, cmd: List[str], timeout: Optional[int] = None
-    ) -> asyncio.subprocess.Process:
-        """Start a new process asynchronously.
-
-        Args:
-            cmd: Command to execute as list of strings
-            timeout: Optional timeout in seconds
-
-        Returns:
-            Process object
-        """
-        ...
-
-    @abstractmethod
     async def cleanup_processes(
         self, processes: List[asyncio.subprocess.Process]
     ) -> None:
@@ -234,6 +236,22 @@ class IProcessManager(Protocol):
     @abstractmethod
     async def cleanup_all(self) -> None:
         """Clean up all tracked processes."""
+        ...
+
+    @deprecated(reason="Use create_process instead")
+    @abstractmethod
+    async def start_process(
+        self, cmd: List[str], timeout: Optional[int] = None
+    ) -> asyncio.subprocess.Process:
+        """Start a new process asynchronously.
+
+        Args:
+            cmd: Command to execute as list of strings
+            timeout: Optional timeout in seconds
+
+        Returns:
+            Process object
+        """
         ...
 
     @abstractmethod
@@ -320,7 +338,11 @@ class IProcessManager(Protocol):
         """
         ...
 
-    async def list_processes(self, labels: Optional[List[str]] = None, status: Optional[ProcessStatus] = None) -> List[Dict[str, Any]]:
+    async def list_processes(
+            self, 
+            labels: Optional[List[str]] = None, 
+            status: Optional[ProcessStatus] = None
+        ) -> List[ProcessInfo]:
         """列出进程，可按标签和状态过滤。
         
         Args:
@@ -328,18 +350,18 @@ class IProcessManager(Protocol):
             status: 状态过滤条件
             
         Returns:
-            List[Dict]: 进程信息列表
+            List[ProcessInfo]: 进程信息列表
         
         Raises:
              NotImplemented: 没有对应实现
         """
         raise NotImplemented()
     
-    async def get_process(self, process_id: str) -> Optional[Union[asyncio.subprocess.Process, ExtendedProcess]]:
+    async def get_process(self, pid: str) -> Optional[Union[asyncio.subprocess.Process, ExtendedProcess]]:
         """获取指定ID的进程对象。
         
         Args:
-            process_id: 进程ID
+            pid: 进程ID
             
         Returns:
             Optional[Union[asyncio.subprocess.Process, ExtendedProcess]]: 进程对象，如果不存在则返回None
@@ -349,11 +371,11 @@ class IProcessManager(Protocol):
         """
         raise NotImplemented()
         
-    async def stop_process(self, process_id: str, force: bool = False) -> bool:
+    async def stop_process(self, pid: str, force: bool = False) -> bool:
         """停止指定的进程。
         
         Args:
-            process_id: 进程ID
+            pid: 进程ID
             force: 是否强制停止
             
         Returns:
@@ -367,23 +389,23 @@ class IProcessManager(Protocol):
     
     async def get_process_output(
         self,
-        process_id: str,
+        pid: str,
         tail: Optional[int] = None,
         since_time: Optional[str] = None,
         until_time: Optional[str] = None,
         error: bool = False,
-    ) -> List[Dict[str, Any]]:
+    ) -> List[LogEntry]:
         """获取进程的输出。
         
         Args:
-            process_id: 进程ID
+            pid: 进程ID
             tail: 只显示最后N行
             since_time: 只显示某个时间点之后的日志
             until_time: 只显示某个时间点之前的日志
             error: 是否获取错误输出
             
         Returns:
-            List[Dict[str, Any]]: 输出行列表
+            List[LogEntry]: 输出行列表，每条记录为LogEntry对象
             
         Raises:
             ValueError: 进程不存在时抛出
@@ -391,49 +413,25 @@ class IProcessManager(Protocol):
         """
         raise NotImplemented()
     
-    async def get_all_output(
-        self,
-        process_id: str,
-        tail: Optional[int] = None,
-        since_time: Optional[str] = None,
-        until_time: Optional[str] = None,
-    ) -> List[Dict[str, Any]]:
-        """获取进程的所有输出（标准输出和错误输出合并）
-        
-        Args:
-            process_id: 进程ID
-            tail: 只返回最后N行，如果为None则返回所有行
-            since_time: ISO格式的时间字符串，只返回该时间之后的日志
-            until_time: ISO格式的时间字符串，只返回该时间之前的日志
-            
-        Returns:
-            包含时间戳、文本和流类型的字典列表
-        
-        Raises:
-            ValueError: 如果进程不存在
-            NotImplemented: 没有对应实现
-        """
-        raise NotImplemented()
-    
     async def follow_process_output(
         self,
-        process_id: str,
+        pid: str,
         tail: Optional[int] = None,
         since_time: Optional[str] = None,
         error: bool = False,
         poll_interval: float = 0.5
-    ) -> AsyncGenerator[Dict[str, Any], None]:
+    ) -> AsyncGenerator[LogEntry, None]:
         """以流式方式获取进程输出，适用于实时监控日志
         
         Args:
-            process_id: 进程ID
+            pid: 进程ID
             tail: 初始时获取最后N行，如果为None则获取所有行
             since_time: ISO格式的时间字符串，只返回该时间之后的日志
             error: 是否获取错误输出
             poll_interval: 轮询间隔，单位秒
             
         Yields:
-            包含时间戳和文本的字典
+            LogEntry: 日志条目对象，包含时间戳和文本
             
         Raises:
             ValueError: 如果进程不存在

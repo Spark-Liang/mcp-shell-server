@@ -9,6 +9,13 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 
 from loguru import logger
+from pydantic import BaseModel, Field
+
+
+class LogEntry(BaseModel):
+    """日志条目模型，表示单条日志记录。"""
+    timestamp: datetime = Field(..., description="日志记录时间戳")
+    text: str = Field("", description="日志内容")
 
 
 class OutputLogger(ABC):
@@ -38,7 +45,7 @@ class OutputLogger(ABC):
         tail: Optional[int] = None, 
         since: Optional[datetime] = None, 
         until: Optional[datetime] = None
-    ) -> List[Dict[str, Any]]:
+    ) -> List[LogEntry]:
         """获取符合条件的日志。
         
         Args:
@@ -47,7 +54,7 @@ class OutputLogger(ABC):
             until: 只返回指定时间之前的日志
             
         Returns:
-            日志记录列表，每条记录包含timestamp和text字段
+            日志记录列表，每条记录为LogEntry对象，包含timestamp和text字段
         """
         pass
     
@@ -121,7 +128,7 @@ class JsonOutputLogger(OutputLogger):
         tail: Optional[int] = None, 
         since: Optional[datetime] = None, 
         until: Optional[datetime] = None
-    ) -> List[Dict[str, Any]]:
+    ) -> List[LogEntry]:
         """获取符合条件的日志。
         
         Args:
@@ -130,7 +137,7 @@ class JsonOutputLogger(OutputLogger):
             until: 只返回指定时间之前的日志
             
         Returns:
-            日志记录列表，每条记录包含timestamp和text字段
+            日志记录列表，每条记录为LogEntry对象，包含timestamp和text字段
         """
         result = []
         
@@ -146,8 +153,8 @@ class JsonOutputLogger(OutputLogger):
                     continue
                     
                 try:
-                    log_entry = json.loads(line)
-                    timestamp_str = log_entry.get("timestamp")
+                    log_data = json.loads(line)
+                    timestamp_str = log_data.get("timestamp")
                     
                     if timestamp_str:
                         timestamp = datetime.fromisoformat(timestamp_str)
@@ -158,10 +165,10 @@ class JsonOutputLogger(OutputLogger):
                         if until and timestamp > until:
                             continue
                             
-                        result.append({
-                            "timestamp": timestamp,
-                            "text": log_entry.get("text", "")
-                        })
+                        result.append(LogEntry(
+                            timestamp=timestamp,
+                            text=log_data.get("text", "")
+                        ))
                 except json.JSONDecodeError:
                     logger.warning(f"解析日志行失败: {line}")
                 except Exception as e:
