@@ -358,7 +358,7 @@ class IProcessManager(Protocol):
         """
         raise NotImplemented()
     
-    async def get_process(self, pid: str) -> Optional[Union[asyncio.subprocess.Process, ExtendedProcess]]:
+    async def get_process(self, pid: int) -> Optional[Union[asyncio.subprocess.Process, ExtendedProcess]]:
         """获取指定ID的进程对象。
         
         Args:
@@ -372,7 +372,7 @@ class IProcessManager(Protocol):
         """
         raise NotImplemented()
         
-    async def stop_process(self, pid: str, force: bool = False) -> bool:
+    async def stop_process(self, pid: int, force: bool = False) -> bool:
         """停止指定的进程。
         
         Args:
@@ -390,10 +390,10 @@ class IProcessManager(Protocol):
     
     async def get_process_output(
         self,
-        pid: str,
+        pid: int,
         tail: Optional[int] = None,
-        since_time: Optional[str] = None,
-        until_time: Optional[str] = None,
+        since_time: Optional[datetime] = None,
+        until_time: Optional[datetime] = None,
         error: bool = False,
     ) -> List[LogEntry]:
         """获取进程的输出。
@@ -416,9 +416,9 @@ class IProcessManager(Protocol):
     
     async def follow_process_output(
         self,
-        pid: str,
+        pid: int,
         tail: Optional[int] = None,
-        since_time: Optional[str] = None,
+        since_time: Optional[datetime] = None,
         error: bool = False,
         poll_interval: float = 0.5
     ) -> AsyncGenerator[LogEntry, None]:
@@ -427,7 +427,7 @@ class IProcessManager(Protocol):
         Args:
             pid: 进程ID
             tail: 初始时获取最后N行，如果为None则获取所有行
-            since_time: ISO格式的时间字符串，只返回该时间之后的日志
+            since_time: 只返回该时间之后的日志
             error: 是否获取错误输出
             poll_interval: 轮询间隔，单位秒
             

@@ -987,8 +987,8 @@ class BackgroundProcessManager(IProcessManager):
         self,
         pid: int,
         tail: Optional[int] = None,
-        since_time: Optional[str] = None,
-        until_time: Optional[str] = None,
+        since_time: Optional[datetime] = None,
+        until_time: Optional[datetime] = None,
         error: bool = False,
     ) -> List[LogEntry]:
         """获取进程的输出日志
@@ -996,8 +996,8 @@ class BackgroundProcessManager(IProcessManager):
         Args:
             pid: 进程PID
             tail: 只返回最后n行
-            since_time: ISO格式的时间字符串，只返回此时间后的日志
-            until_time: ISO格式的时间字符串，只返回此时间前的日志
+            since_time: 只返回此时间后的日志
+            until_time: 只返回此时间前的日志
             error: 是否获取错误输出
             
         Returns:
@@ -1010,28 +1010,12 @@ class BackgroundProcessManager(IProcessManager):
         if not bg_process:
             raise ValueError(f"没有找到PID为 {pid} 的进程")
             
-        # 解析时间过滤器
-        since = None
-        until = None
-        
-        if since_time:
-            try:
-                since = datetime.fromisoformat(since_time)
-            except ValueError:
-                raise ValueError(f"无效的since_time格式: {since_time}，应为ISO格式的时间字符串")
-                
-        if until_time:
-            try:
-                until = datetime.fromisoformat(until_time)
-            except ValueError:
-                raise ValueError(f"无效的until_time格式: {until_time}，应为ISO格式的时间字符串")
-                
         # 获取输出
         try:
             if error:
-                return bg_process.get_error(tail=tail, since=since, until=until)
+                return bg_process.get_error(tail=tail, since=since_time, until=until_time)
             else:
-                return bg_process.get_output(tail=tail, since=since, until=until)
+                return bg_process.get_output(tail=tail, since=since_time, until=until_time)
         except Exception as e:
             raise ValueError(f"获取进程输出时出错: {str(e)}")
     
@@ -1039,7 +1023,7 @@ class BackgroundProcessManager(IProcessManager):
         self,
         pid: int,
         tail: Optional[int] = None,
-        since_time: Optional[str] = None,
+        since_time: Optional[datetime] = None,
         error: bool = False,
         poll_interval: float = 0.5
     ) -> AsyncGenerator[LogEntry, None]:
@@ -1048,7 +1032,7 @@ class BackgroundProcessManager(IProcessManager):
         Args:
             pid: 进程PID
             tail: 首次获取的尾部行数
-            since_time: ISO格式的时间字符串，只返回此时间后的日志
+            since_time: 只返回此时间后的日志
             error: 是否获取错误输出
             poll_interval: 轮询间隔(秒)
             
@@ -1061,35 +1045,27 @@ class BackgroundProcessManager(IProcessManager):
         bg_process = await self.get_process(pid)
         if not bg_process:
             raise ValueError(f"没有找到PID为 {pid} 的进程")
-            
-        # 解析时间过滤器
-        since = None
-        if since_time:
-            try:
-                since = datetime.fromisoformat(since_time)
-            except ValueError:
-                raise ValueError(f"无效的since_time格式: {since_time}，应为ISO格式的时间字符串")
                 
         # 首次获取现有日志
         logs = []
         if error:
             # 处理可能是协程的情况
             if asyncio.iscoroutinefunction(bg_process.get_error):
-                logs = await bg_process.get_error(tail=tail, since=since)
+                logs = await bg_process.get_error(tail=tail, since=since_time)
             else:
-                logs = bg_process.get_error(tail=tail, since=since)
+                logs = bg_process.get_error(tail=tail, since=since_time)
         else:
             # 处理可能是协程的情况
             if asyncio.iscoroutinefunction(bg_process.get_output):
-                logs = await bg_process.get_output(tail=tail, since=since)
+                logs = await bg_process.get_output(tail=tail, since=since_time)
             else:
-                logs = bg_process.get_output(tail=tail, since=since)
+                logs = bg_process.get_output(tail=tail, since=since_time)
                 
         for log in logs:
             yield log
             
         # 记住最后一条日志的时间
-        last_time = logs[-1].timestamp if logs else (since or datetime.now())
+        last_time = logs[-1].timestamp if logs else (since_time or datetime.now())
         
         # 持续轮询新日志
         while bg_process.is_running():

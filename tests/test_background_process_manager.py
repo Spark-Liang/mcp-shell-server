@@ -161,13 +161,13 @@ async def test_get_process_output(bg_process_manager, cleanup_bg_processes):
     # 测试带参数获取
     bg_process.get_output.reset_mock()
 
-    since_time = (datetime.now() - timedelta(hours=1)).isoformat()
+    since_time = datetime.now() - timedelta(hours=1)
     await bg_process_manager.get_process_output(pid, tail=10, since_time=since_time)
 
     # 验证参数传递正确
     call_args = bg_process.get_output.call_args[1]
     assert call_args["tail"] == 10
-    assert isinstance(call_args["since"], datetime)  # 验证since_time被转换为datetime
+    assert isinstance(call_args["since"], datetime)  # 验证since_time是datetime对象
     assert call_args["until"] is None  # 验证until为None
 
     # 测试获取不存在的进程输出

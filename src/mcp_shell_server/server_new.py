@@ -126,19 +126,25 @@ async def shell_execute(
     ),
     stdin: Optional[str] = Field(
         default=None,
-        description="Input to be passed to the command via stdin"
+        description="Input to be passed to the command via stdin",
     ),
-    timeout: Optional[Union[int, float, str]] = Field(
+    timeout: int = Field(
         default=DEFAULT_TIMEOUT,
-        description="Maximum execution time in seconds. **Must be a positive number**. If None, the command will run indefinitely.",
+        description="Maximum execution time in seconds. If None, the command will run indefinitely.",
+        ge=0,
     ),
     envs: Optional[Dict[str, str]] = Field(
         default=None,
         description="Additional environment variables for the command"
     ),
-    encoding: Optional[str] = Field(
-        default=None,
-        description="Character encoding for command output (e.g. 'utf-8', 'gbk', 'cp936')"
+    encoding: str = Field(
+        default="utf-8",
+        description="Character encoding for command output (e.g. 'utf-8', 'gbk', 'cp936')",
+    ),
+    limit_lines: int = Field(
+        default=500,
+        description="Maximum number of lines to return in each TextContent",
+        ge=1
     )
 ) -> Sequence[TextContent]:
     
@@ -174,26 +180,62 @@ async def shell_execute(
 
         # 添加stdout（如果存在）
         if result.get("stdout"):
-            content.append(TextContent(
-                type="text", 
-                text=f"""---
+            stdout_lines = result.get("stdout").splitlines()
+            total_stdout_lines = len(stdout_lines)
+            
+            if total_stdout_lines > limit_lines:
+                # 截断超过限制的行数
+                truncated_stdout = "\n".join(stdout_lines[:limit_lines])
+                truncated_message = f"\n... (output truncated, showing {limit_lines} of {total_stdout_lines} lines)"
+                
+                content.append(TextContent(
+                    type="text", 
+                    text=f"""---
+stdout: (truncated, {limit_lines}/{total_stdout_lines} lines shown)
+---
+{truncated_stdout}
+{truncated_message}
+"""
+                ))
+            else:
+                content.append(TextContent(
+                    type="text", 
+                    text=f"""---
 stdout:
 ---
 {result.get("stdout")}
 """
-            ))
+                ))
 
         # 添加stderr（如果存在且不包含特定消息）
         stderr = result.get("stderr")
         if stderr and "cannot set terminal process group" not in stderr:
-            content.append(TextContent(
-                type="text", 
-                text=f"""---
+            stderr_lines = stderr.splitlines()
+            total_stderr_lines = len(stderr_lines)
+            
+            if total_stderr_lines > limit_lines:
+                # 截断超过限制的行数
+                truncated_stderr = "\n".join(stderr_lines[:limit_lines])
+                truncated_message = f"\n... (output truncated, showing {limit_lines} of {total_stderr_lines} lines)"
+                
+                content.append(TextContent(
+                    type="text", 
+                    text=f"""---
+stderr: (truncated, {limit_lines}/{total_stderr_lines} lines shown)
+---
+{truncated_stderr}
+{truncated_message}
+"""
+                ))
+            else:
+                content.append(TextContent(
+                    type="text", 
+                    text=f"""---
 stderr:
 ---
 {stderr}
 """
-            ))
+                ))
 
         return content
     except ValueError as e:
@@ -221,19 +263,22 @@ async def shell_bg_start(
     ),
     stdin: Optional[str] = Field(
         default=None,
-        description="Input to be passed to the command via stdin"
+        description="Input to be passed to the command via stdin",
+        
     ),
     envs: Optional[Dict[str, str]] = Field(
         default=None,
         description="Additional environment variables for the command"
     ),
-    encoding: Optional[str] = Field(
-        default=None,
-        description="Character encoding for command output (e.g. 'utf-8', 'gbk', 'cp936')"
+    encoding: str = Field(
+        default="utf-8",
+        description="Character encoding for command output (e.g. 'utf-8', 'gbk', 'cp936')",
     ),
-    timeout: Optional[Union[int, float, str]] = Field(
-        default=None,
-        description="Maximum execution time in seconds. **Must be a positive number**. If None, the command will run indefinitely.",
+    timeout: int = Field(
+        default=DEFAULT_TIMEOUT,
+        description="Maximum execution time in seconds. If None, the command will run indefinitely.",
+        ge=0,
+        
     )
 ) -> Sequence[TextContent]:
     timeout = _format_to_number(timeout)
@@ -277,7 +322,7 @@ async def shell_bg_list(
     ),
     status: Optional[str] = Field(
         default=None,
-        description="Filter processes by status ('running', 'completed', 'failed', 'terminated', 'error')"
+        description="Filter processes by status ({})".format(", ".join([f"'{s.value}'" for s in ProcessStatus]))
     )
 ) -> Sequence[TextContent]:
     """List background processes with optional label and status filtering"""
@@ -330,7 +375,7 @@ async def shell_bg_list(
 
 @mcp.tool()
 async def shell_bg_stop(
-    process_id: str = Field(
+    pid: int = Field(
         description="ID of the process to stop"
     ),
     force: bool = Field(
@@ -342,9 +387,9 @@ async def shell_bg_stop(
     
     try:
         # 获取进程信息（用于返回消息）
-        process = await default_shell_executor.get_process(process_id)
+        process = await default_shell_executor.get_process(pid)
         if not process:
-            raise ValueError(f"Process with ID {process_id} not found")
+            raise ValueError(f"Process with ID {pid} not found")
             
         # 构建描述字符串
         cmd_str = process.command if hasattr(process, 'command') else process.process_info.shell_cmd
@@ -355,11 +400,11 @@ async def shell_bg_stop(
         description = process.description if hasattr(process, 'description') else process.process_info.description
             
         # 使用 ShellExecutor 停止进程
-        await default_shell_executor.stop_process(process_id, force)
+        await default_shell_executor.stop_process(pid, force)
         
         return [TextContent(
             type="text",
-            text=f"Process {process_id} has been {'forcefully terminated' if force else 'gracefully stopped'}\nCommand: {cmd_str}\nDescription: {description}"
+            text=f"Process {pid} has been {'forcefully terminated' if force else 'gracefully stopped'}\nCommand: {cmd_str}\nDescription: {description}"
         )]
     except ValueError as e:
         raise ValueError(str(e))
@@ -369,7 +414,7 @@ async def shell_bg_stop(
 
 @mcp.tool()
 async def shell_bg_logs(
-    process_id: str = Field(
+    pid: int = Field(
         description="ID of the process to get output from"
     ),
     tail: Optional[int] = Field(
@@ -401,22 +446,29 @@ async def shell_bg_logs(
         default="%Y-%m-%d %H:%M:%S.%f",
         description="Format of the timestamp prefix, using strftime format"
     ),
-    follow_seconds: Optional[Union[int, float, str]] = Field(
-        default=None,
-        description="Wait for the specified number of seconds to get new logs. **Must be a positive number**. If None, return immediately.",
+    follow_seconds: int = Field(
+        default=1,
+        description="Wait for the specified number of seconds to get new logs. If 0, return immediately.",
+        ge=0
+    ),
+    limit_lines: int = Field(
+        default=500,
+        description="Maximum number of lines to return in each TextContent",
+        ge=1
     )
 ) -> Sequence[TextContent]:
     """Get output from a background process, similar to 'docker logs'"""
     
     follow_seconds = _format_to_number(follow_seconds)
-    if follow_seconds is not None and follow_seconds <= 0:
-        raise ValueError(f"Invalid follow_seconds value: {follow_seconds}, must be a positive number")
+    if follow_seconds is not None and follow_seconds < 0:
+        raise ValueError(f"Invalid follow_seconds value: {follow_seconds}, must be a non-negative number")
     
     def _format_process_output(
         output: List[LogEntry], 
         stream_name: str, 
         add_time_prefix: bool, 
-        time_prefix_format: str
+        time_prefix_format: str,
+        limit_lines: int
     ) -> TextContent:
         """格式化进程输出"""
         if output:
@@ -428,12 +480,25 @@ async def shell_bg_logs(
                 else:
                     formatted_lines.append(line.text)
             
-            line_count = len(formatted_lines)
-            output_text = "\n".join(formatted_lines)
-            return TextContent(
-                type="text", 
-                text=f"---\n{stream_name}: {line_count} lines\n---\n{output_text}\n"
-            )
+            total_lines = len(formatted_lines)
+            
+            # 处理行数限制
+            if total_lines > limit_lines:
+                # 截断行数
+                truncated_lines = formatted_lines[:limit_lines]
+                output_text = "\n".join(truncated_lines)
+                truncated_message = f"\n... (output truncated, showing {limit_lines} of {total_lines} lines)"
+                
+                return TextContent(
+                    type="text", 
+                    text=f"---\n{stream_name}: (truncated, {limit_lines}/{total_lines} lines shown)\n---\n{output_text}{truncated_message}\n"
+                )
+            else:
+                output_text = "\n".join(formatted_lines)
+                return TextContent(
+                    type="text", 
+                    text=f"---\n{stream_name}: {total_lines} lines\n---\n{output_text}\n"
+                )
         else:
             return TextContent(
                 type="text",
@@ -442,9 +507,9 @@ async def shell_bg_logs(
     
     try:
         # 获取进程对象
-        process = await default_shell_executor.get_process(process_id)
+        process = await default_shell_executor.get_process(pid)
         if not process:
-            raise ValueError(f"Process with ID {process_id} not found")
+            raise ValueError(f"Process with ID {pid} not found")
             
         # 获取进程信息
         status_value = (
@@ -464,7 +529,7 @@ async def shell_bg_logs(
             cmd_str = cmd_str[:47] + "..."
             
         # 添加进程信息作为第一个TextContent
-        status_info = f"**Process {process_id} (status: {status_value})**\n"
+        status_info = f"**Process {pid} (status: {status_value})**\n"
         status_info += f"Command: {cmd_str}\n"
         
         # 添加标签信息（如果有）
@@ -491,24 +556,75 @@ async def shell_bg_logs(
             
         result_content = [TextContent(type="text", text=status_info)]
         
-        # 如果请求了标准输出
+        # 存储初始获取时间和结果
+        initial_stdout_output = []
+        initial_stderr_output = []
+        current_time = datetime.now()
+        
+        # 获取初始日志
         if with_stdout:
             # 使用 ShellExecutor 获取标准输出
-            stdout_output = await default_shell_executor.get_process_output(
-                pid=process_id,
+            initial_stdout_output = await default_shell_executor.get_process_output(
+                pid=pid,
                 tail=tail,
                 since=since,
                 until=until,
                 error=False
             )
             
+        if with_stderr:
+            # 使用 ShellExecutor 获取错误输出
+            initial_stderr_output = await default_shell_executor.get_process_output(
+                pid=pid,
+                tail=tail,
+                since=since,
+                until=until,
+                error=True
+            )
+        
+        # 如果 follow_seconds > 0，等待并获取新日志
+        if follow_seconds and follow_seconds > 0:
+            # 等待指定的秒数
+            await asyncio.sleep(follow_seconds)
+            
+            # 获取新的日志（仅获取上次之后的部分）
+            new_stdout_output = []
+            new_stderr_output = []
+            
+            if with_stdout:
+                new_stdout_output = await default_shell_executor.get_process_output(
+                    pid=pid,
+                    since=current_time,  # 仅获取初始获取之后的日志
+                    until=None,
+                    error=False
+                )
+                
+            if with_stderr:
+                new_stderr_output = await default_shell_executor.get_process_output(
+                    pid=pid,
+                    since=current_time,  # 仅获取初始获取之后的日志
+                    until=None,
+                    error=True
+                )
+                
+            # 合并初始日志和新日志
+            stdout_output = initial_stdout_output + new_stdout_output
+            stderr_output = initial_stderr_output + new_stderr_output
+        else:
+            # 不等待，直接使用初始日志
+            stdout_output = initial_stdout_output
+            stderr_output = initial_stderr_output
+        
+        # 格式化并添加标准输出
+        if with_stdout:
             if stdout_output:
                 # 格式化输出
                 stdout_content = _format_process_output(
                     stdout_output, 
                     "STDOUT", 
                     add_time_prefix,
-                    time_prefix_format
+                    time_prefix_format,
+                    limit_lines
                 )
                 result_content.append(stdout_content)
             else:
@@ -517,24 +633,16 @@ async def shell_bg_logs(
                     text="No standard output available"
                 ))
         
-        # 如果请求了错误输出
+        # 格式化并添加错误输出
         if with_stderr:
-            # 使用 ShellExecutor 获取错误输出
-            stderr_output = await default_shell_executor.get_process_output(
-                pid=process_id,
-                tail=tail,
-                since=since,
-                until=until,
-                error=True
-            )
-            
             if stderr_output:
                 # 格式化输出
                 stderr_content = _format_process_output(
                     stderr_output, 
                     "STDERR", 
                     add_time_prefix,
-                    time_prefix_format
+                    time_prefix_format,
+                    limit_lines
                 )
                 result_content.append(stderr_content)
             else:
@@ -543,20 +651,27 @@ async def shell_bg_logs(
                     text="No error output available"
                 ))
                 
-        # 如果指定了follow_seconds，显示帮助信息
-        if follow_seconds is not None:
-            help_lines = [
-                "\n---",
-                "**To continue following output:**",
-                f"- For standard output: `shell_bg_logs(process_id={process_id}, follow_seconds=60)`",
-            ]
-            if with_stderr:
-                help_lines.append(f"- For error output: `shell_bg_logs(process_id={process_id}, with_stderr=True, follow_seconds=60)`")
-            
-            result_content.append(TextContent(
-                type="text",
-                text="\n".join(help_lines)
-            ))
+        # 添加帮助信息
+        extra_info_lines = [
+            "---",
+            "extra infos:",
+            "---",
+            "**Follow Options:**"
+        ]
+        
+        if follow_seconds > 0:
+            extra_info_lines.append(f"- Showing logs with {follow_seconds}s follow time")
+            extra_info_lines.append(f"- For longer follow: `shell_bg_logs(pid={pid}, follow_seconds=60" + 
+                              (", with_stderr=True" if with_stderr else "") + ")`")
+        else:
+            extra_info_lines.append("- Showing logs without following (snapshot)")
+            extra_info_lines.append(f"- To follow logs: `shell_bg_logs(pid={pid}, follow_seconds=5" + 
+                              (", with_stderr=True" if with_stderr else "") + ")`")
+        
+        result_content.append(TextContent(
+            type="text",
+            text="\n".join(extra_info_lines)
+        ))
             
         return result_content
     except Exception as e:
@@ -565,7 +680,7 @@ async def shell_bg_logs(
 
 @mcp.tool()
 async def shell_bg_clean(
-    process_ids: List[str] = Field(
+    pids: List[int] = Field(
         description="要清理的进程ID列表"
     )
 ) -> Sequence[TextContent]:
@@ -579,11 +694,11 @@ async def shell_bg_clean(
     }
     
     # 验证进程列表
-    if not process_ids:
+    if not pids:
         return [TextContent(type="text", text="No process IDs provided to clean up")]
         
     # 尝试清理每个进程
-    for pid in process_ids:
+    for pid in pids:
         try:
             # 获取进程信息用于记录
             process = await default_shell_executor.get_process(pid)
@@ -655,7 +770,7 @@ async def shell_bg_clean(
 
 @mcp.tool()
 async def shell_bg_detail(
-    process_id: str = Field(
+    pid: int = Field(
         description="ID of the process to get details for"
     )
 ) -> Sequence[TextContent]:
@@ -663,12 +778,12 @@ async def shell_bg_detail(
     
     try:
         # 获取进程
-        process = await default_shell_executor.get_process(process_id)
+        process = await default_shell_executor.get_process(pid)
         if not process:
-            raise ValueError(f"Process {process_id} not found")
+            raise ValueError(f"Process {pid} not found")
         
         # 获取进程详细信息
-        lines = [f"**Process Details for PID {process_id}**"]
+        lines = [f"**Process Details for PID {pid}**"]
         
         # 基本信息
         lines.append("\n**Basic Information:**")
@@ -730,18 +845,18 @@ async def shell_bg_detail(
         
         # 输出信息
         lines.append("\n**Output Information:**")
-        lines.append(f"To view standard output: `shell_bg_logs(process_id={process_id})`")
-        lines.append(f"To view error output: `shell_bg_logs(process_id={process_id}, with_stderr=True)`")
+        lines.append(f"To view standard output: `shell_bg_logs(process_id={pid})`")
+        lines.append(f"To view error output: `shell_bg_logs(process_id={pid}, with_stderr=True)`")
         
         # 控制命令
         lines.append("\n**Control Commands:**")
         
         # 根据进程状态提供不同的命令
         if status == ProcessStatus.RUNNING or (isinstance(status, str) and status == 'running'):
-            lines.append(f"Stop the process: `shell_bg_stop(process_id={process_id})`")
-            lines.append(f"Force stop the process: `shell_bg_stop(process_id={process_id}, force=True)`")
+            lines.append(f"Stop the process: `shell_bg_stop(process_id={pid})`")
+            lines.append(f"Force stop the process: `shell_bg_stop(process_id={pid}, force=True)`")
         else:
-            lines.append(f"Clean up the process: `shell_bg_clean(process_ids=[{process_id}])`")
+            lines.append(f"Clean up the process: `shell_bg_clean(process_ids=[{pid}])`")
         
         return [TextContent(type="text", text="\n".join(lines))]
         
@@ -778,23 +893,23 @@ def start_web_server(host: str = '0.0.0.0', port: Optional[int] = None, debug: b
     web_server_thread.start()
     
     # 构建URL前缀字符串
-    prefix_str = f"/{url_prefix.rstrip('/')}" if url_prefix else ""
+    prefix_str = f"/{url_prefix.lstrip('/')}" if url_prefix else ""
     
     # 记录Web界面地址
-    logger.info(f"Web 管理界面启动在端口 {port}")
+    logger.info(f"Web management site start at {port}")
     
     # 如果绑定的是所有接口(0.0.0.0)，则显示localhost和实际的IP地址
     if host == '0.0.0.0':
-        logger.info(f"您可以访问: http://localhost:{port}{prefix_str}")
+        logger.info(f"you can access: http://localhost:{port}{prefix_str}")
         
         # 获取本机所有IP地址
         ip_addresses = get_local_ip_addresses()
         if ip_addresses:
             for ip in ip_addresses:
-                logger.info(f"局域网访问地址: http://{ip}:{port}{prefix_str}")
+                logger.info(f"local access address: http://{ip}:{port}{prefix_str}")
     else:
         # 使用指定的主机地址
-        logger.info(f"您可以访问: http://{host}:{port}{prefix_str}")
+        logger.info(f"you can access: http://{host}:{port}{prefix_str}")
 
 # Click命令组
 @click.group(invoke_without_command=True)
