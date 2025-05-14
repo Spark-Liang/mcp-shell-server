@@ -410,7 +410,7 @@ class BackgroundProcessManager(IProcessManager):
         self._setup_signal_handlers()
         
         # 进程保留时间设置（秒）
-        self._auto_cleanup_age = int(os.environ.get(PROCESS_RETENTION_SECONDS, 3600))  # 默认1小时
+        self._auto_cleanup_age = int(os.environ.get(PROCESS_RETENTION_SECONDS, 300))  # 默认5分钟
 
     def _setup_signal_handlers(self) -> None:
         """设置信号处理器，用于优雅地管理进程。"""

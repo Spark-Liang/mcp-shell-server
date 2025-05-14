@@ -311,7 +311,9 @@ Execute a shell command and return the results.
 | directory | string     | Yes      | Working directory for command execution       |
 | stdin     | string     | No       | Input to be passed to the command            |
 | timeout   | integer    | No       | Maximum execution time in seconds (default: 15) |
+| envs      | object     | No       | Additional environment variables for the command |
 | encoding  | string     | No       | Character encoding for command output (e.g. 'utf-8', 'gbk', 'cp936') |
+| limit_lines | integer  | No       | Maximum number of lines to return in each TextContent (default: 500) |
 
 #### Response Fields
 
@@ -346,7 +348,7 @@ Start a background process for long-running commands.
 ```json
 {
     "type": "text",
-    "text": "Started background process with ID: process_123"
+    "text": "Started background process with ID: 123"
 }
 ```
 
@@ -388,7 +390,7 @@ List running or completed background processes.
 ```json
 {
     "type": "text",
-    "text": "ID | STATUS | START TIME | COMMAND | DESCRIPTION | LABELS\n---------\nprocess_123 | running | 2023-05-06 14:30:00 | npm start | Start Node.js app | nodejs"
+    "text": "ID | STATUS | START TIME | COMMAND | DESCRIPTION | LABELS\n---------\n123 | running | 2023-05-06 14:30:00 | npm start | Start Node.js app | nodejs"
 }
 ```
 
@@ -414,7 +416,7 @@ Stop a running background process.
 
 ```json
 {
-    "process_id": "process_123",
+    "pid": 123,
     "force": false
 }
 ```
@@ -424,7 +426,7 @@ Stop a running background process.
 ```json
 {
     "type": "text",
-    "text": "Process process_123 has been gracefully stopped\nCommand: npm start\nDescription: Start Node.js application"
+    "text": "Process 123 has been gracefully stopped\nCommand: npm start\nDescription: Start Node.js application"
 }
 ```
 
@@ -432,7 +434,7 @@ Stop a running background process.
 
 | Field       | Type       | Required | Description                                   |
 |-------------|------------|----------|-----------------------------------------------|
-| process_id  | string     | Yes      | ID of the process to stop                     |
+| pid         | integer    | Yes      | ID of the process to stop                     |
 | force       | boolean    | No       | Whether to force stop the process (default: false) |
 
 #### Response Fields
@@ -450,7 +452,7 @@ Get output from a background process.
 
 ```json
 {
-    "process_id": "process_123",
+    "pid": 123,
     "tail": 100,
     "since": "2023-05-06T14:30:00",
     "until": "2023-05-06T15:30:00",
@@ -458,7 +460,8 @@ Get output from a background process.
     "with_stderr": true,
     "add_time_prefix": true,
     "time_prefix_format": "%Y-%m-%d %H:%M:%S.%f",
-    "follow_seconds": 5
+    "follow_seconds": 5,
+    "limit_lines": 500
 }
 ```
 
@@ -468,7 +471,7 @@ Get output from a background process.
 [
     {
         "type": "text",
-        "text": "**Process process_123 (status: running)**\nCommand: npm start\nDescription: Start Node.js application\nStatus: Process is still running"
+        "text": "**Process 123 (status: running)**\nCommand: npm start\nDescription: Start Node.js application\nStatus: Process is still running"
     },
     {
         "type": "text",
@@ -485,15 +488,16 @@ Get output from a background process.
 
 | Field              | Type       | Required | Description                                   |
 |--------------------|------------|----------|-----------------------------------------------|
-| process_id         | string     | Yes      | ID of the process to get output from          |
+| pid                | integer    | Yes      | ID of the process to get output from          |
 | tail               | integer    | No       | Number of lines to show from the end          |
-| since              | string     | No       | Show logs since timestamp (e.g. '2023-05-06T14:30:00') |
-| until              | string     | No       | Show logs until timestamp (e.g. '2023-05-06T15:30:00') |
+| since              | string     | No       | Show logs since timestamp (ISO format e.g. '2023-05-06T14:30:00') |
+| until              | string     | No       | Show logs until timestamp (ISO format e.g. '2023-05-06T15:30:00') |
 | with_stdout        | boolean    | No       | Show standard output (default: true)          |
 | with_stderr        | boolean    | No       | Show error output (default: false)            |
 | add_time_prefix    | boolean    | No       | Add timestamp prefix to each output line (default: true) |
 | time_prefix_format | string     | No       | Format for timestamp prefix (default: "%Y-%m-%d %H:%M:%S.%f") |
-| follow_seconds     | integer    | No       | Wait for specified seconds to get new logs    |
+| follow_seconds     | integer    | No       | Wait for specified seconds to get new logs (default: 1)   |
+| limit_lines        | integer    | No       | Maximum number of lines to return in each TextContent (default: 500) |
 
 #### Response Fields
 
@@ -510,7 +514,7 @@ Clean up completed or failed background processes.
 
 ```json
 {
-    "process_ids": ["process_123", "process_456"]
+    "pids": [123, 456]
 }
 ```
 
@@ -519,7 +523,7 @@ Clean up completed or failed background processes.
 ```json
 {
     "type": "text",
-    "text": "PROCESS ID | STATUS | MESSAGE\n---------\nprocess_123 | SUCCESS | Process cleaned successfully\nprocess_456 | FAILED | Process is still running"
+    "text": "**Successfully cleaned 1 processes:**\n- PID: 123 | Command: npm start\n\n**Unable to clean 1 running processes:**\nNote: Cannot clean running processes. Stop them first with `shell_bg_stop()`.\n- PID: 456 | Command: node server.js\n\n**Failed to clean 1 processes:**\n- PID: 789 | Reason: Process not found"
 }
 ```
 
@@ -527,7 +531,7 @@ Clean up completed or failed background processes.
 
 | Field       | Type       | Required | Description                                   |
 |-------------|------------|----------|-----------------------------------------------|
-| process_ids | string[]   | Yes      | List of process IDs to clean up               |
+| pids        | integer[]  | Yes      | List of process IDs to clean up               |
 
 #### Response Fields
 
@@ -544,7 +548,7 @@ Get detailed information about a specific background process.
 
 ```json
 {
-    "process_id": "process_123"
+    "pid": 123
 }
 ```
 
@@ -553,7 +557,7 @@ Get detailed information about a specific background process.
 ```json
 {
     "type": "text",
-    "text": "### Process Details: process_123\n\n#### Basic Information\n- **Status**: completed\n- **Command**: `npm start`\n- **Description**: Start Node.js application\n- **Labels**: nodejs, app\n\n#### Timing\n- **Started**: 2023-05-06 14:30:00\n- **Ended**: 2023-05-06 14:35:27\n- **Duration**: 0:05:27\n\n#### Execution\n- **Working Directory**: /path/to/project\n- **Exit Code**: 0\n\n#### Output Information\n- Use `shell_bg_logs` tool to view process output\n- Example: `shell_bg_logs(process_id='process_123')`"
+    "text": "### Process Details: 123\n\n#### Basic Information\n- **Status**: completed\n- **Command**: `npm start`\n- **Description**: Start Node.js application\n- **Labels**: nodejs, app\n\n#### Timing\n- **Started**: 2023-05-06 14:30:00\n- **Ended**: 2023-05-06 14:35:27\n- **Duration**: 0:05:27\n\n#### Execution\n- **Working Directory**: /path/to/project\n- **Exit Code**: 0\n\n#### Output Information\n- Use `shell_bg_logs` tool to view process output\n- Example: `shell_bg_logs(pid=123)`"
 }
 ```
 
@@ -561,7 +565,7 @@ Get detailed information about a specific background process.
 
 | Field       | Type       | Required | Description                                   |
 |-------------|------------|----------|-----------------------------------------------|
-| process_id  | string     | Yes      | ID of the process to get details for          |
+| pid         | integer    | Yes      | ID of the process to get details for          |
 
 #### Response Fields
 

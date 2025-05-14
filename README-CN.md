@@ -311,7 +311,9 @@ Web界面提供了一种方便的方式来监控和管理后台进程：
 | directory| string     | 是   | 命令执行的工作目录                           |
 | stdin    | string     | 否   | 通过stdin传递给命令的输入                    |
 | timeout  | integer    | 否   | 最大执行时间（秒）（默认：15）                 |
+| envs     | object     | 否   | 命令的附加环境变量                           |
 | encoding | string     | 否   | 命令输出的字符编码（例如：'utf-8', 'gbk', 'cp936'） |
+| limit_lines | integer | 否   | 每个TextContent返回的最大行数（默认：500）     |
 
 #### 响应字段
 
@@ -346,7 +348,7 @@ Web界面提供了一种方便的方式来监控和管理后台进程：
 ```json
 {
     "type": "text",
-    "text": "已启动后台进程，ID: process_123"
+    "text": "已启动后台进程，ID: 123"
 }
 ```
 
@@ -388,7 +390,7 @@ Web界面提供了一种方便的方式来监控和管理后台进程：
 ```json
 {
     "type": "text",
-    "text": "ID | 状态 | 开始时间 | 命令 | 描述 | 标签\n---------\nprocess_123 | running | 2023-05-06 14:30:00 | npm start | 启动Node.js应用 | nodejs"
+    "text": "ID | 状态 | 开始时间 | 命令 | 描述 | 标签\n---------\n123 | running | 2023-05-06 14:30:00 | npm start | 启动Node.js应用 | nodejs"
 }
 ```
 
@@ -414,7 +416,7 @@ Web界面提供了一种方便的方式来监控和管理后台进程：
 
 ```json
 {
-    "process_id": "process_123",
+    "pid": 123,
     "force": false
 }
 ```
@@ -424,7 +426,7 @@ Web界面提供了一种方便的方式来监控和管理后台进程：
 ```json
 {
     "type": "text",
-    "text": "进程process_123已被优雅地停止\n命令: npm start\n描述: 启动Node.js应用"
+    "text": "进程123已被优雅地停止\n命令: npm start\n描述: 启动Node.js应用"
 }
 ```
 
@@ -432,7 +434,7 @@ Web界面提供了一种方便的方式来监控和管理后台进程：
 
 | 字段       | 类型     | 必需  | 描述                               |
 |-----------|----------|------|-----------------------------------|
-| process_id| string   | 是   | 要停止的进程ID                      |
+| pid       | integer  | 是   | 要停止的进程ID                      |
 | force     | boolean  | 否   | 是否强制停止进程（默认：false）       |
 
 #### 响应字段
@@ -450,7 +452,7 @@ Web界面提供了一种方便的方式来监控和管理后台进程：
 
 ```json
 {
-    "process_id": "process_123",
+    "pid": 123,
     "tail": 100,
     "since": "2023-05-06T14:30:00",
     "until": "2023-05-06T15:30:00",
@@ -458,7 +460,8 @@ Web界面提供了一种方便的方式来监控和管理后台进程：
     "with_stderr": true,
     "add_time_prefix": true,
     "time_prefix_format": "%Y-%m-%d %H:%M:%S.%f",
-    "follow_seconds": 5
+    "follow_seconds": 5,
+    "limit_lines": 500
 }
 ```
 
@@ -468,7 +471,7 @@ Web界面提供了一种方便的方式来监控和管理后台进程：
 [
     {
         "type": "text",
-        "text": "**进程process_123（状态：running）**\n命令: npm start\n描述: 启动Node.js应用\n状态: 进程仍在运行"
+        "text": "**进程123（状态：running）**\n命令: npm start\n描述: 启动Node.js应用\n状态: 进程仍在运行"
     },
     {
         "type": "text",
@@ -485,15 +488,16 @@ Web界面提供了一种方便的方式来监控和管理后台进程：
 
 | 字段               | 类型      | 必需  | 描述                                       |
 |-------------------|-----------|------|-------------------------------------------|
-| process_id        | string    | 是   | 获取输出的进程ID                            |
+| pid               | integer   | 是   | 获取输出的进程ID                            |
 | tail              | integer   | 否   | 从末尾显示的行数                             |
-| since             | string    | 否   | 显示从该时间戳开始的日志（例如：'2023-05-06T14:30:00'） |
-| until             | string    | 否   | 显示到该时间戳为止的日志（例如：'2023-05-06T15:30:00'） |
+| since             | string    | 否   | 显示从该时间戳开始的日志（ISO格式，例如：'2023-05-06T14:30:00'） |
+| until             | string    | 否   | 显示到该时间戳为止的日志（ISO格式，例如：'2023-05-06T15:30:00'） |
 | with_stdout       | boolean   | 否   | 显示标准输出（默认：true）                    |
 | with_stderr       | boolean   | 否   | 显示错误输出（默认：false）                   |
 | add_time_prefix   | boolean   | 否   | 为每行输出添加时间戳前缀（默认：true）          |
 | time_prefix_format| string    | 否   | 时间戳前缀的格式（默认："%Y-%m-%d %H:%M:%S.%f"） |
-| follow_seconds    | integer   | 否   | 等待指定秒数以获取新日志                       |
+| follow_seconds    | integer   | 否   | 等待指定秒数以获取新日志（默认：1）             |
+| limit_lines       | integer   | 否   | 每个TextContent返回的最大行数（默认：500）      |
 
 #### 响应字段
 
@@ -510,7 +514,7 @@ Web界面提供了一种方便的方式来监控和管理后台进程：
 
 ```json
 {
-    "process_ids": ["process_123", "process_456"]
+    "pids": [123, 456]
 }
 ```
 
@@ -519,7 +523,7 @@ Web界面提供了一种方便的方式来监控和管理后台进程：
 ```json
 {
     "type": "text",
-    "text": "进程ID | 状态 | 消息\n---------\nprocess_123 | SUCCESS | 进程清理成功\nprocess_456 | FAILED | 进程仍在运行中"
+    "text": "**成功清理了1个进程:**\n- PID: 123 | 命令: npm start\n\n**无法清理1个运行中的进程:**\n注意: 无法清理正在运行的进程。请先使用`shell_bg_stop()`停止它们。\n- PID: 456 | 命令: node server.js\n\n**清理1个进程失败:**\n- PID: 789 | 原因: 找不到进程"
 }
 ```
 
@@ -527,7 +531,7 @@ Web界面提供了一种方便的方式来监控和管理后台进程：
 
 | 字段        | 类型       | 必需  | 描述                         |
 |------------|------------|------|----------------------------|
-| process_ids| string[]   | 是   | 要清理的进程ID列表            |
+| pids       | integer[]  | 是   | 要清理的进程ID列表            |
 
 #### 响应字段
 
@@ -544,7 +548,7 @@ Web界面提供了一种方便的方式来监控和管理后台进程：
 
 ```json
 {
-    "process_id": "process_123"
+    "pid": 123
 }
 ```
 
@@ -553,7 +557,7 @@ Web界面提供了一种方便的方式来监控和管理后台进程：
 ```json
 {
     "type": "text",
-    "text": "### 进程详情: process_123\n\n#### 基本信息\n- **状态**: completed\n- **命令**: `npm start`\n- **描述**: 启动Node.js应用\n- **标签**: nodejs, app\n\n#### 时间信息\n- **开始时间**: 2023-05-06 14:30:00\n- **结束时间**: 2023-05-06 14:35:27\n- **持续时间**: 0:05:27\n\n#### 执行信息\n- **工作目录**: /path/to/project\n- **退出码**: 0\n\n#### 输出信息\n- 使用`shell_bg_logs`工具查看进程输出\n- 示例: `shell_bg_logs(process_id='process_123')`"
+    "text": "### 进程详情: 123\n\n#### 基本信息\n- **状态**: completed\n- **命令**: `npm start`\n- **描述**: 启动Node.js应用\n- **标签**: nodejs, app\n\n#### 时间信息\n- **开始时间**: 2023-05-06 14:30:00\n- **结束时间**: 2023-05-06 14:35:27\n- **持续时间**: 0:05:27\n\n#### 执行信息\n- **工作目录**: /path/to/project\n- **退出码**: 0\n\n#### 输出信息\n- 使用`shell_bg_logs`工具查看进程输出\n- 示例: `shell_bg_logs(pid=123)`"
 }
 ```
 
@@ -561,7 +565,7 @@ Web界面提供了一种方便的方式来监控和管理后台进程：
 
 | 字段       | 类型     | 必需  | 描述                   |
 |-----------|----------|------|------------------------|
-| process_id| string   | 是   | 获取详情的进程ID        |
+| pid       | integer  | 是   | 获取详情的进程ID        |
 
 #### 响应字段
 
