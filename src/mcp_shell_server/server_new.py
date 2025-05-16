@@ -21,6 +21,7 @@ from .shell_executor import default_shell_executor
 from .interfaces import LogEntry
 from . import background_process_manager_web as web_server
 from .background_process_manager import ProcessStatus
+from .env_name_const import DEFAULT_ENCODING
 
 # 配置日志
 logging.basicConfig(level=logging.INFO)
@@ -28,6 +29,8 @@ logger = logging.getLogger("mcp-shell-server")
 
 # 默认超时时间
 DEFAULT_TIMEOUT = 15
+
+DEFAULT_ENCODING_VALUE = os.environ.get(DEFAULT_ENCODING, "utf-8")
 
 # Web服务器线程
 web_server_thread = None
@@ -138,7 +141,7 @@ async def shell_execute(
         description="Additional environment variables for the command"
     ),
     encoding: str = Field(
-        default="utf-8",
+        default=DEFAULT_ENCODING_VALUE,
         description="Character encoding for command output (e.g. 'utf-8', 'gbk', 'cp936')",
     ),
     limit_lines: int = Field(
@@ -271,7 +274,7 @@ async def shell_bg_start(
         description="Additional environment variables for the command"
     ),
     encoding: str = Field(
-        default="utf-8",
+        default=DEFAULT_ENCODING_VALUE,
         description="Character encoding for command output (e.g. 'utf-8', 'gbk', 'cp936')",
     ),
     timeout: int = Field(

@@ -126,4 +126,40 @@ class ProcessManagerTestBase(ABC):
                 # 验证进程已被终止
                 assert process.returncode is not None
             except asyncio.TimeoutError:
-                pytest.fail("Process was not cleaned up properly") 
+                pytest.fail("Process was not cleaned up properly")
+    
+    @pytest.mark.asyncio
+    async def test_process_encoding(self):
+        """测试进程的编码处理功能"""
+        async with get_process_manager(self.create_manager) as process_manager:
+            # 使用encode_echo命令测试不同编码
+            cmd = f"{sys.executable} {os.path.join(os.path.dirname(__file__), 'cmd_for_test.py')} encode_echo 测试文本"
+            
+            # 指定UTF-8编码
+            process_utf8 = await process_manager.create_process(
+                shell_cmd=cmd,
+                directory=os.getcwd(),
+                encoding="utf-8"
+            )
+            
+            stdout_utf8, stderr_utf8 = await process_manager.execute_with_timeout(process_utf8)
+            
+            # 验证输出不为空且错误输出为空
+            assert len(stdout_utf8) > 0
+            assert stderr_utf8 == b""
+            
+            # 测试不同的编码参数
+            if sys.platform == "win32":
+                # Windows平台测试GBK编码
+                cmd_gbk = f"{sys.executable} {os.path.join(os.path.dirname(__file__), 'cmd_for_test.py')} encode_echo 测试GBK编码"
+                process_gbk = await process_manager.create_process(
+                    shell_cmd=cmd_gbk,
+                    directory=os.getcwd(),
+                    encoding="gbk"  # 在Windows上指定GBK编码
+                )
+                
+                stdout_gbk, stderr_gbk = await process_manager.execute_with_timeout(process_gbk)
+                
+                # 验证输出不为空且错误输出为空
+                assert len(stdout_gbk) > 0
+                assert stderr_gbk == b"" 

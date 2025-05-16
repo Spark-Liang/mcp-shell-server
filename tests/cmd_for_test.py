@@ -2,6 +2,7 @@ import sys
 import time
 import re
 import argparse
+import os
 
 def echo():
     # 简单实现echo命令，输出所有参数
@@ -9,6 +10,25 @@ def echo():
     parser.add_argument('text', nargs='*', help='Text to echo')
     args = parser.parse_args(sys.argv[1:])
     print(' '.join(args.text))
+
+def encode_echo():
+    # 实现encode_echo命令，用于验证不同编码的字符串
+    parser = argparse.ArgumentParser(description='Encode echo command')
+    parser.add_argument('text', nargs='*', help='Text to echo with encoding')
+    args = parser.parse_args(sys.argv[1:])
+    
+    # 仅使用基本ASCII字符和一些安全的中文字符
+    safe_chars = "Basic ASCII and Safe Chinese: 你好，世界！"
+    
+    if args.text:
+        print(' '.join(args.text))
+    
+    # 避免在不支持的编码下使用特殊字符
+    try:
+        print(safe_chars)
+    except UnicodeEncodeError:
+        # 如果无法编码，只输出ASCII部分
+        print("Basic ASCII only (encoding error occurred)")
 
 def grep():
     # 实现简化版grep命令，支持基本模式匹配
@@ -44,6 +64,28 @@ def cat():
     with open(args.file, 'r', encoding='utf-8') as f:
         print(f.read(), end='')
 
+def binary_cat():
+    # 实现二进制cat命令，以二进制模式读取并输出文件内容
+    parser = argparse.ArgumentParser(description='Binary cat command')
+    parser.add_argument('file', help='File to display in binary mode')
+    args = parser.parse_args(sys.argv[1:])
+    
+    # 以二进制模式读取文件内容
+    with open(args.file, 'rb') as f:
+        content = f.read()
+    
+    # 将二进制内容直接写入标准输出的缓冲区
+    # 这可以确保二进制数据不会因编码转换而丢失或损坏
+    if hasattr(sys.stdout, 'buffer'):
+        sys.stdout.buffer.write(content)
+    else:
+        # 如果stdout没有buffer属性（某些环境下），尝试其他方法
+        try:
+            os.write(1, content)  # 1 是stdout的文件描述符
+        except:
+            # 最后尝试直接打印，可能会有编码问题
+            print(content.decode('utf-8', errors='replace'), end='')
+
 def exit_cmd():
     # 实现exit命令，以指定的退出码退出
     parser = argparse.ArgumentParser(description='Exit command')
@@ -62,8 +104,12 @@ if __name__ == "__main__":
         sleep()
     elif cmd_name == "cat" or "cat.py" in cmd_name:
         cat()
+    elif cmd_name == "binary_cat" or "binary_cat.py" in cmd_name:
+        binary_cat()
     elif cmd_name == "exit" or "exit.py" in cmd_name:
         exit_cmd()
+    elif cmd_name == "encode_echo" or "encode_echo.py" in cmd_name:
+        encode_echo()
     else:
         # 主入口点处理
         if len(sys.argv) > 1:
@@ -79,12 +125,16 @@ if __name__ == "__main__":
                 sleep()
             elif command == "cat":
                 cat()
+            elif command == "binary_cat":
+                binary_cat()
             elif command == "exit":
                 exit_cmd()
+            elif command == "encode_echo":
+                encode_echo()
             else:
                 print(f"Unknown command: {command}", file=sys.stderr)
                 sys.exit(1)
         else:
             print("Usage: python cmd_for_test.py [command] [args...]", file=sys.stderr)
-            print("Available commands: echo, grep, sleep, cat, exit", file=sys.stderr)
+            print("Available commands: echo, encode_echo, grep, sleep, cat, binary_cat, exit", file=sys.stderr)
             sys.exit(1)

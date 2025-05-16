@@ -156,6 +156,11 @@ class ShellExecutor:
             process_manager if process_manager is not None else BackgroundProcessManager()
         )
 
+    @property
+    def allowed_commands(self) -> List[str]:
+        """Get the list of allowed commands"""
+        return self.validator.get_allowed_commands()
+
     def _validate_command(self, command: List[str]) -> None:
         """
         Validate if the command is allowed to be executed.
@@ -252,7 +257,6 @@ class ShellExecutor:
         timeout: Optional[int] = None,
         envs: Optional[Dict[str, str]] = None,
         encoding: Optional[str] = None,
-        start_time: float = None,
     ) -> Dict[str, Any]:
         """
         Core execution logic for shell commands, with error handling through exceptions.
@@ -369,18 +373,21 @@ class ShellExecutor:
         # Adjust shell execution command based on OS
         if sys.platform == "win32":
              # For cmd.exe, /c executes the command and then terminates
-             shell_cmd = f'{shell} /c "{shell_cmd}"'
+             shell_cmd = "{} /c {}".format(shell,shell_cmd.replace('\'', ''))
         else:
              # For sh/bash, -i for interactive, -c for command string
              shell_cmd = f"{shell} -i -c {shlex.quote(shell_cmd)}"
 
         try:
             process = await self.process_manager.create_process(
-                shell_cmd, directory, stdout_handle=stdout_handle, envs=envs
+                shell_cmd, directory, 
+                envs=envs, encoding=encoding,
+                timeout=timeout,
+                stdout_handle=stdout_handle
             )
 
             # Send input if provided
-            stdin_bytes = stdin.encode() if stdin else None
+            stdin_bytes = stdin.encode(encoding=encoding) if stdin else None
 
             async def communicate_with_timeout():
                 try:
@@ -417,7 +424,6 @@ class ShellExecutor:
                 "stderr": stderr.decode(encoding).strip() if stderr else "",
                 "returncode": final_returncode,
                 "status": process.returncode,
-                "execution_time": time.time() - (start_time or time.time()),
                 "directory": directory,
             }
 
@@ -446,11 +452,6 @@ class ShellExecutor:
             if process and process.returncode is None:
                 process.kill()
                 await process.wait()
-
-    @property
-    def allowed_commands(self) -> List[str]:
-        """Get the list of allowed commands"""
-        return self.validator.get_allowed_commands()
 
     async def execute(
         self,
@@ -481,8 +482,10 @@ class ShellExecutor:
         try:
             # 调用_do_execute方法执行核心逻辑
             result_dict = await self._do_execute(
-                command, directory, stdin, timeout, envs, encoding, start_time
+                command, directory, stdin, timeout, envs, encoding
             )
+            result_dict["start_time"] = start_time
+            result_dict["execution_time"] = time.time() - start_time
             return ShellCommandResponse.model_validate(result_dict)
         except ShellExecutionError as e:
             # 处理自定义异常

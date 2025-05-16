@@ -19,7 +19,7 @@ from .interfaces import LogEntry, ProcessInfo, ProcessStatus, IProcessManager, E
 from .output_manager import OutputManager
 from .env_name_const import PROCESS_RETENTION_SECONDS
 
-logger = logging.getLogger("mcp-shell-server")
+logger = logging.getLogger(__name__)
 
 class BackgroundProcess(ExtendedProcess):
     """表示一个后台运行的进程"""
