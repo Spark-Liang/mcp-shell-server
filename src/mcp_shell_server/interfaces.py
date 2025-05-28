@@ -1,30 +1,48 @@
 """Tool handler abstraction for MCP shell server."""
 
-import json
-from typing import Any, Dict, List, Optional, Sequence, Type, Union, Generic, TypeVar, Protocol, Tuple, IO, AsyncGenerator
-from abc import ABC, abstractmethod
-from itertools import chain
-from functools import wraps
-
-from pydantic import BaseModel, ValidationError, Field
-from mcp.types import TextContent, Tool, ImageContent, EmbeddedResource
-import pydantic_core
-
 import asyncio.subprocess
+import json
+from abc import ABC, abstractmethod
 from datetime import datetime
 from enum import Enum
+from functools import wraps
+from itertools import chain
+from typing import (
+    IO,
+    Any,
+    AsyncGenerator,
+    Dict,
+    Generic,
+    List,
+    Optional,
+    Protocol,
+    Sequence,
+    Tuple,
+    Type,
+    TypeVar,
+    Union,
+)
 
-T_ARGUMENTS = TypeVar('T_ARGUMENTS', bound=BaseModel)
+import pydantic_core
+from mcp.types import EmbeddedResource, ImageContent, TextContent, Tool
+from pydantic import BaseModel, Field, ValidationError
+
+T_ARGUMENTS = TypeVar("T_ARGUMENTS", bound=BaseModel)
+
 
 # 缺少的deprecated装饰器
 def deprecated(reason: str):
     """装饰器，用于标记方法已废弃"""
+
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
             return func(*args, **kwargs)
+
         return wrapper
+
     return decorator
+
 
 class ToolHandler(Generic[T_ARGUMENTS], ABC):
     """抽象基类，定义工具处理器接口"""
@@ -46,30 +64,30 @@ class ToolHandler(Generic[T_ARGUMENTS], ABC):
     def argument_model(self) -> Type[T_ARGUMENTS]:
         """参数模型类型"""
         pass
-    
+
     def get_tool_def(self) -> Tool:
         """
         获取工具定义
-        
+
         基于name、description和argument_model属性生成Tool对象
-        
+
         Returns:
             Tool对象
         """
         # 从模型中提取JSON Schema
         schema = self.argument_model.model_json_schema()
-        
+
         # 确保schema是一个有效的JSON Schema对象
         if not isinstance(schema, dict):
             raise ValueError("Model schema must be a dictionary")
-        
+
         # 转换为Tool的inputSchema格式
         input_schema = {
             "type": "object",
             "properties": schema.get("properties", {}),
             "required": schema.get("required", []),
         }
-        
+
         return Tool(
             name=self.name,
             description=self.description,
@@ -81,10 +99,10 @@ class ToolHandler(Generic[T_ARGUMENTS], ABC):
     ) -> Sequence[Union[TextContent, ImageContent, EmbeddedResource]]:
         """
         将任意类型的结果转换为内容对象序列
-        
+
         Args:
             result: 任意类型的结果
-            
+
         Returns:
             内容对象序列
         """
@@ -95,7 +113,9 @@ class ToolHandler(Generic[T_ARGUMENTS], ABC):
             return [result]
 
         if isinstance(result, (list, tuple)):
-            return list(chain.from_iterable(self._convert_to_content(item) for item in result))
+            return list(
+                chain.from_iterable(self._convert_to_content(item) for item in result)
+            )
 
         if not isinstance(result, str):
             try:
@@ -110,10 +130,10 @@ class ToolHandler(Generic[T_ARGUMENTS], ABC):
     ) -> Sequence[Union[TextContent, ImageContent, EmbeddedResource]]:
         """
         处理工具调用
-        
+
         Args:
             arguments: 工具参数字典
-            
+
         Returns:
             内容对象序列
         """
@@ -127,15 +147,15 @@ class ToolHandler(Generic[T_ARGUMENTS], ABC):
         except ValidationError as e:
             # 转换为ValueError以保持与原始代码一致的异常类型
             raise ValueError(str(e))
-    
+
     @abstractmethod
     async def _do_run_tool(self, arguments: T_ARGUMENTS) -> Any:
         """
         实际执行工具的抽象方法
-        
+
         Args:
             arguments: 已验证的参数对象
-            
+
         Returns:
             工具执行结果，可以是任何类型
         """
@@ -145,14 +165,17 @@ class ToolHandler(Generic[T_ARGUMENTS], ABC):
 # 进程状态枚举
 class ProcessStatus(str, Enum):
     """进程状态枚举"""
+
     RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
     TERMINATED = "terminated"
     ERROR = "error"
 
+
 class ProcessInfo(BaseModel):
     """进程信息"""
+
     pid: int = Field(description="进程ID")
     shell_cmd: str = Field(description="进程命令")
     directory: str = Field(description="进程工作目录")
@@ -166,11 +189,14 @@ class ProcessInfo(BaseModel):
     status: ProcessStatus = Field(description="进程状态")
     exit_code: Optional[int] = Field(description="进程退出码")
 
+
 class LogEntry(BaseModel):
     """日志条目模型，表示单条日志记录。"""
+
     timestamp: datetime = Field(..., description="日志记录时间戳")
     text: str = Field("", description="日志内容")
     stream: Optional[str] = Field(None, description="日志流类型，如stdout或stderr")
+
 
 class ExtendedProcess(Protocol):
     """扩展的Process协议，包含标准Process方法和扩展方法"""
@@ -179,39 +205,39 @@ class ExtendedProcess(Protocol):
     def returncode(self) -> Optional[int]:
         """进程返回码"""
         ...
-        
+
     @property
     def pid(self) -> Optional[int]:
         """进程ID"""
         ...
-        
+
     @property
     def stdin(self) -> Optional[asyncio.StreamWriter]:
         """标准输入流"""
         ...
-        
+
     @property
     def stdout(self) -> Optional[asyncio.StreamReader]:
         """标准输出流"""
         ...
-        
+
     @property
     def stderr(self) -> Optional[asyncio.StreamReader]:
         """标准错误流"""
         ...
-        
+
     async def wait(self) -> int:
         """等待进程结束"""
         ...
-        
+
     async def communicate(self, input: Optional[bytes] = None) -> Tuple[bytes, bytes]:
         """与进程通信"""
         ...
-        
+
     def terminate(self) -> None:
         """终止进程"""
         ...
-        
+
     def kill(self) -> None:
         """强制终止进程"""
         ...
@@ -220,6 +246,7 @@ class ExtendedProcess(Protocol):
     def process_info(self) -> ProcessInfo:
         """进程信息"""
         ...
+
 
 class IProcessManager(Protocol):
 
@@ -233,7 +260,7 @@ class IProcessManager(Protocol):
             processes: List of processes to clean up
         """
         ...
-    
+
     @abstractmethod
     async def cleanup_all(self) -> None:
         """Clean up all tracked processes."""
@@ -266,7 +293,7 @@ class IProcessManager(Protocol):
         encoding: Optional[str] = None,
         timeout: Optional[int] = None,
         description: Optional[str] = "Default process description",
-        labels: Optional[List[str]] = None
+        labels: Optional[List[str]] = None,
     ) -> Union[asyncio.subprocess.Process, ExtendedProcess]:
         """Create a new subprocess with the given parameters.
 
@@ -340,54 +367,54 @@ class IProcessManager(Protocol):
         ...
 
     async def list_processes(
-            self, 
-            labels: Optional[List[str]] = None, 
-            status: Optional[ProcessStatus] = None
-        ) -> List[ProcessInfo]:
+        self, labels: Optional[List[str]] = None, status: Optional[ProcessStatus] = None
+    ) -> List[ProcessInfo]:
         """列出进程，可按标签和状态过滤。
-        
+
         Args:
             labels: 标签过滤条件
             status: 状态过滤条件
-            
+
         Returns:
             List[ProcessInfo]: 进程信息列表
-        
+
         Raises:
              NotImplemented: 没有对应实现
         """
-        raise NotImplemented()
-    
-    async def get_process(self, pid: int) -> Optional[Union[asyncio.subprocess.Process, ExtendedProcess]]:
+        raise NotImplementedError()
+
+    async def get_process(
+        self, pid: int
+    ) -> Optional[Union[asyncio.subprocess.Process, ExtendedProcess]]:
         """获取指定ID的进程对象。
-        
+
         Args:
             pid: 进程ID
-            
+
         Returns:
             Optional[Union[asyncio.subprocess.Process, ExtendedProcess]]: 进程对象，如果不存在则返回None
-        
+
         Raises:
              NotImplemented: 没有对应实现
         """
-        raise NotImplemented()
-        
+        raise NotImplementedError()
+
     async def stop_process(self, pid: int, force: bool = False) -> bool:
         """停止指定的进程。
-        
+
         Args:
             pid: 进程ID
             force: 是否强制停止
-            
+
         Returns:
             bool: 是否成功停止
-            
+
         Raises:
             ValueError: 进程不存在时抛出
             NotImplemented: 没有对应实现
         """
-        raise NotImplemented()
-    
+        raise NotImplementedError()
+
     async def get_process_output(
         self,
         pid: int,
@@ -397,45 +424,45 @@ class IProcessManager(Protocol):
         error: bool = False,
     ) -> List[LogEntry]:
         """获取进程的输出。
-        
+
         Args:
             pid: 进程ID
             tail: 只显示最后N行
             since_time: 只显示某个时间点之后的日志
             until_time: 只显示某个时间点之前的日志
             error: 是否获取错误输出
-            
+
         Returns:
             List[LogEntry]: 输出行列表，每条记录为LogEntry对象
-            
+
         Raises:
             ValueError: 进程不存在时抛出
             NotImplemented: 没有对应实现
         """
-        raise NotImplemented()
-    
+        raise NotImplementedError()
+
     async def follow_process_output(
         self,
         pid: int,
         tail: Optional[int] = None,
         since_time: Optional[datetime] = None,
         error: bool = False,
-        poll_interval: float = 0.5
+        poll_interval: float = 0.5,
     ) -> AsyncGenerator[LogEntry, None]:
         """以流式方式获取进程输出，适用于实时监控日志
-        
+
         Args:
             pid: 进程ID
             tail: 初始时获取最后N行，如果为None则获取所有行
             since_time: 只返回该时间之后的日志
             error: 是否获取错误输出
             poll_interval: 轮询间隔，单位秒
-            
+
         Yields:
             LogEntry: 日志条目对象，包含时间戳和文本
-            
+
         Raises:
             ValueError: 如果进程不存在
             NotImplemented: 没有对应实现
         """
-        raise NotImplemented()
+        raise NotImplementedError()

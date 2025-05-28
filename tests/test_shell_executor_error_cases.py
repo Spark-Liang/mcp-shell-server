@@ -64,15 +64,13 @@ async def test_process_execution_timeout(monkeypatch, temp_test_dir):
     executor = ShellExecutor()
 
     # Test process timeout
-    seconds = 5 
+    seconds = 5
     command = ["sleep", str(seconds)]
-    
+
     response = await asyncio.wait_for(
-        executor.execute(command, temp_test_dir, timeout=seconds)
-        , timeout=seconds + 1
+        executor.execute(command, temp_test_dir, timeout=seconds), timeout=seconds + 1
     )
     assert response.error == f"Command timed out after {seconds} seconds"
-        
 
 
 @pytest.mark.asyncio

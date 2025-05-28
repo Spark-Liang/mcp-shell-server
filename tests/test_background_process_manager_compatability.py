@@ -1,9 +1,7 @@
 """Tests for BackgroundProcessManager compatibility with ProcessManager."""
 
 import asyncio
-import os
-import tempfile
-from unittest.mock import AsyncMock, MagicMock, patch, PropertyMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -33,11 +31,11 @@ async def test_create_process(bg_process_manager):
     mock_process.stdin.drain = AsyncMock()
     mock_process.stdout = AsyncMock()
     mock_process.stderr = AsyncMock()
-    
+
     with patch(
-        "asyncio.create_subprocess_shell", 
-        new_callable=AsyncMock, 
-        return_value=mock_process
+        "asyncio.create_subprocess_shell",
+        new_callable=AsyncMock,
+        return_value=mock_process,
     ):
         # 调用create_process方法
         process = await bg_process_manager.create_process(
@@ -45,7 +43,7 @@ async def test_create_process(bg_process_manager):
             directory="/tmp",
             stdin="test input",
         )
-        
+
         # 验证获得了BackgroundProcess对象
         assert isinstance(process, BackgroundProcess)
         assert process.pid == 13293
@@ -59,14 +57,12 @@ async def test_execute_with_timeout_success(bg_process_manager):
     # 创建mock进程对象
     mock_process = MagicMock()
     mock_process.communicate = AsyncMock(return_value=(b"output", b"error"))
-    
+
     # 调用方法并验证结果
     stdout, stderr = await bg_process_manager.execute_with_timeout(
-        mock_process, 
-        stdin=b"input", 
-        timeout=1.0
+        mock_process, stdin=b"input", timeout=1.0
     )
-    
+
     # 验证结果
     assert stdout == b"output"
     assert stderr == b"error"
@@ -82,16 +78,16 @@ async def test_execute_with_timeout_timeout(bg_process_manager):
     mock_process.communicate = AsyncMock(side_effect=asyncio.TimeoutError("Timeout"))
     mock_process.terminate = MagicMock()
     mock_process.kill = MagicMock()
-    mock_process.wait = AsyncMock(side_effect=[asyncio.TimeoutError(), 1])  # 模拟第一次等待超时，第二次成功
-    
+    mock_process.wait = AsyncMock(
+        side_effect=[asyncio.TimeoutError(), 1]
+    )  # 模拟第一次等待超时，第二次成功
+
     # 测试超时
     with pytest.raises(TimeoutError):
         await bg_process_manager.execute_with_timeout(
-            mock_process, 
-            stdin=b"input", 
-            timeout=1.0
+            mock_process, stdin=b"input", timeout=1.0
         )
-    
+
     # 验证进程被终止
     mock_process.terminate.assert_called_once()
     mock_process.kill.assert_called_once()
@@ -106,28 +102,28 @@ async def test_execute_pipeline_success(bg_process_manager):
     mock_bg_proc1.pid = 1001
     mock_bg_proc1.returncode = 0
     mock_bg_proc1.wait = AsyncMock(return_value=0)
-    
+
     mock_bg_proc2 = MagicMock(spec=BackgroundProcess)
     mock_bg_proc2.pid = 1002
     mock_bg_proc2.returncode = 0
     mock_bg_proc2.wait = AsyncMock(return_value=0)
-    
+
     # 模拟create_process方法返回mock对象
     with patch.object(
-        bg_process_manager, 
-        "create_process", 
-        new_callable=AsyncMock, 
-        side_effect=[mock_bg_proc1, mock_bg_proc2]
+        bg_process_manager,
+        "create_process",
+        new_callable=AsyncMock,
+        side_effect=[mock_bg_proc1, mock_bg_proc2],
     ):
         # 模拟execute_with_timeout方法
         with patch.object(
-            bg_process_manager, 
-            "execute_with_timeout", 
-            new_callable=AsyncMock, 
+            bg_process_manager,
+            "execute_with_timeout",
+            new_callable=AsyncMock,
             side_effect=[
                 (b"output1", b""),
                 (b"final output", b""),
-            ]
+            ],
         ):
             # 调用execute_pipeline
             stdout, stderr, return_code = await bg_process_manager.execute_pipeline(
@@ -136,7 +132,7 @@ async def test_execute_pipeline_success(bg_process_manager):
                 first_stdin="input",
                 timeout=5.0,
             )
-            
+
             # 验证结果
             assert stdout == b"final output"
             assert stderr == b""
@@ -150,27 +146,27 @@ async def test_execute_pipeline_with_error(bg_process_manager):
     mock_proc1 = MagicMock(spec=BackgroundProcess)
     mock_proc1.returncode = 0
     mock_proc1.wait = AsyncMock(return_value=0)
-    
+
     mock_proc2 = MagicMock(spec=BackgroundProcess)
     mock_proc2.returncode = 1
     mock_proc2.wait = AsyncMock(return_value=1)
-    
+
     # 模拟create_process和execute_with_timeout
     with patch.object(
-        bg_process_manager, 
-        "create_process", 
-        new_callable=AsyncMock, 
-        side_effect=[mock_proc1, mock_proc2]
+        bg_process_manager,
+        "create_process",
+        new_callable=AsyncMock,
+        side_effect=[mock_proc1, mock_proc2],
     ):
         with patch.object(
-            bg_process_manager, 
-            "execute_with_timeout", 
-            new_callable=AsyncMock, 
+            bg_process_manager,
+            "execute_with_timeout",
+            new_callable=AsyncMock,
             side_effect=[
                 (b"output1", b""),
                 (b"", b"error message"),
-                ValueError("Command failed")
-            ]
+                ValueError("Command failed"),
+            ],
         ):
             # 调用execute_pipeline，预期会抛出异常
             with pytest.raises(ValueError):
@@ -178,7 +174,7 @@ async def test_execute_pipeline_with_error(bg_process_manager):
                     commands=["ls -la", "invalid command"],
                     directory="/tmp",
                 )
-            
+
             # 验证进程被清理
             assert mock_proc1.kill.call_count <= 1
             assert mock_proc2.kill.call_count <= 1
@@ -192,13 +188,15 @@ async def test_cleanup_processes(bg_process_manager):
     mock_proc1.returncode = None
     mock_proc1.kill = MagicMock()
     mock_proc1.wait = AsyncMock(return_value=0)
-    
+
     mock_proc2 = AsyncMock()
     mock_proc2.returncode = 0
-    
+
     # 调用cleanup_processes
-    count = await bg_process_manager.cleanup_processes(processes=[mock_proc1, mock_proc2])
-    
+    count = await bg_process_manager.cleanup_processes(
+        processes=[mock_proc1, mock_proc2]
+    )
+
     # 验证结果
     assert count == 1  # 只有一个正在运行的进程
     mock_proc1.kill.assert_called_once()
@@ -210,9 +208,9 @@ async def test_create_process_with_error(bg_process_manager):
     """测试创建进程失败的情况"""
     # 模拟create_subprocess_shell抛出异常
     with patch(
-        "asyncio.create_subprocess_shell", 
-        new_callable=AsyncMock, 
-        side_effect=OSError("Failed to create process")
+        "asyncio.create_subprocess_shell",
+        new_callable=AsyncMock,
+        side_effect=OSError("Failed to create process"),
     ):
         # 调用create_process，预期会抛出异常
         with pytest.raises(ValueError) as excinfo:
@@ -220,7 +218,7 @@ async def test_create_process_with_error(bg_process_manager):
                 shell_cmd="invalid command",
                 directory="/tmp",
             )
-        
+
         # 验证异常消息
         assert "创建进程失败" in str(excinfo.value)
 
@@ -234,7 +232,7 @@ async def test_execute_pipeline_empty_commands(bg_process_manager):
             commands=[],
             directory="/tmp",
         )
-    
+
     # 验证异常消息
     assert "No commands provided" in str(excinfo.value)
 
@@ -246,20 +244,20 @@ async def test_execute_pipeline_timeout(bg_process_manager):
     mock_proc = MagicMock(spec=BackgroundProcess)
     mock_proc.returncode = None
     mock_proc.kill = MagicMock()
-    
+
     # 模拟create_process返回模拟进程
     with patch.object(
-        bg_process_manager, 
-        "create_process", 
-        new_callable=AsyncMock, 
-        return_value=mock_proc
+        bg_process_manager,
+        "create_process",
+        new_callable=AsyncMock,
+        return_value=mock_proc,
     ):
         # 模拟execute_with_timeout超时
         with patch.object(
-            bg_process_manager, 
-            "execute_with_timeout", 
-            new_callable=AsyncMock, 
-            side_effect=asyncio.TimeoutError("Timeout")
+            bg_process_manager,
+            "execute_with_timeout",
+            new_callable=AsyncMock,
+            side_effect=asyncio.TimeoutError("Timeout"),
         ):
             # 调用execute_pipeline，预期会抛出异常
             with pytest.raises(asyncio.TimeoutError):
@@ -268,6 +266,6 @@ async def test_execute_pipeline_timeout(bg_process_manager):
                     directory="/tmp",
                     timeout=1.0,
                 )
-            
+
             # 验证进程被终止（至少被调用一次，不要求精确次数）
             mock_proc.kill.assert_called()

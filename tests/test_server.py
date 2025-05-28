@@ -1,7 +1,3 @@
-import asyncio
-import pytest
-from mcp.types import TextContent, Tool
-
 # from mcp_shell_server.server import call_tool, list_tools
 
 
@@ -31,7 +27,6 @@ from mcp.types import TextContent, Tool
 #     with pytest.raises(RuntimeError) as excinfo:
 #         await call_tool("shell_execute", "not a dict")
 #     assert "Arguments must be a dictionary" in str(excinfo.value)
-
 
 
 # async def test_main_server(mocker):
@@ -103,4 +98,4 @@ from mcp.types import TextContent, Tool
 #     with pytest.raises(RuntimeError) as exc:
 #         await run_stdio_server()
 
-#     assert str(exc.value) == "Test error" 
+#     assert str(exc.value) == "Test error"

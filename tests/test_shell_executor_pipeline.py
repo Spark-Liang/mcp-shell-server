@@ -2,9 +2,9 @@
 
 import os
 import tempfile
+from unittest.mock import AsyncMock
 
 import pytest
-from unittest.mock import AsyncMock
 
 from mcp_shell_server.shell_executor import ShellExecutor
 
@@ -64,20 +64,20 @@ async def test_pipeline_execution_success(
 ):
     """Test successful pipeline execution with proper return value"""
     monkeypatch.setenv("ALLOW_COMMANDS", "echo,grep")
-    
+
     # 直接构造期望的返回结果
     expected_result = {
         "error": None,
         "status": 0,
         "stdout": "mocked pipeline output",
         "stderr": "",
-        "execution_time": 0.1
+        "execution_time": 0.1,
     }
-    
+
     # Set up mock for pipeline execution
     expected_output = b"mocked pipeline output\n"
     mock_process_manager.execute_pipeline.return_value = (expected_output, b"", 0)
-    
+
     # 替换_execute_pipeline方法
     shell_executor_with_mock._execute_pipeline = AsyncMock(return_value=expected_result)
 
@@ -99,20 +99,20 @@ async def test_pipeline_cleanup_and_timeouts(
 ):
     """Test cleanup of processes in pipelines and timeout handling"""
     monkeypatch.setenv("ALLOW_COMMANDS", "echo,grep")
-    
+
     # 创建模拟超时结果
     timeout_result = {
         "error": "Command timed out after 1 seconds",
         "status": -1,
         "stdout": "",
         "stderr": "Command timed out after 1 seconds",
-        "execution_time": 1.0
+        "execution_time": 1.0,
     }
-    
+
     # 使用side_effect模拟抛出异常情况
     async def mock_execute_pipeline(*args, **kwargs):
         raise TimeoutError("Command timed out after 1 seconds")
-    
+
     # 设置mock
     mock_process_manager.execute_pipeline.side_effect = mock_execute_pipeline
     shell_executor_with_mock._execute_pipeline = AsyncMock(return_value=timeout_result)

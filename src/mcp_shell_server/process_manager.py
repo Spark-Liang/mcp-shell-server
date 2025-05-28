@@ -4,7 +4,7 @@ import asyncio
 import logging
 import os
 import signal
-from typing import IO, Any, Dict, List, Optional, Set, Tuple, Union, AsyncGenerator
+from typing import IO, Any, Dict, List, Optional, Set, Tuple, Union
 from weakref import WeakSet
 
 from mcp_shell_server.interfaces import IProcessManager
