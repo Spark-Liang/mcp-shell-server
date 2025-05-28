@@ -707,12 +707,19 @@ class BackgroundProcessManager(IProcessManager):
 
                             # 尝试终止进程
                             try:
+                                # 为terminate操作添加超时保护
                                 if asyncio.iscoroutinefunction(
                                     bg_process.process.terminate
                                 ):
-                                    await bg_process.process.terminate()
+                                    try:
+                                        await asyncio.wait_for(
+                                            bg_process.process.terminate(), timeout=1.0
+                                        )
+                                    except asyncio.TimeoutError:
+                                        logger.warning(f"终止进程 {bg_process.pid} 操作超时")
                                 else:
                                     bg_process.process.terminate()
+                                
                                 # 给进程一些时间来正常退出
                                 try:
                                     await asyncio.wait_for(
@@ -720,15 +727,28 @@ class BackgroundProcessManager(IProcessManager):
                                     )
                                 except asyncio.TimeoutError:
                                     # 如果仍然无法终止，强制结束
+                                    logger.warning(f"进程 {bg_process.pid} 未响应终止信号，尝试强制结束")
+                                    
+                                    # 为kill操作添加超时保护
                                     if asyncio.iscoroutinefunction(
                                         bg_process.process.kill
                                     ):
-                                        await bg_process.process.kill()
+                                        try:
+                                            await asyncio.wait_for(
+                                                bg_process.process.kill(), timeout=1.0
+                                            )
+                                        except asyncio.TimeoutError:
+                                            logger.warning(f"强制结束进程 {bg_process.pid} 操作超时")
                                     else:
                                         bg_process.process.kill()
-                                    await asyncio.wait_for(
-                                        bg_process.process.wait(), timeout=1.0
-                                    )
+                                        
+                                    # 再次等待进程结束
+                                    try:
+                                        await asyncio.wait_for(
+                                            bg_process.process.wait(), timeout=1.0
+                                        )
+                                    except asyncio.TimeoutError:
+                                        logger.error(f"无法终止进程 {bg_process.pid}，可能需要手动清理")
                             except Exception as e:
                                 logger.error(f"终止超时进程时出错: {e}")
 
