@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import os
+import sys
 
 from flask import Flask, jsonify, render_template, request
 
@@ -14,8 +15,44 @@ logger = logging.getLogger("mcp-shell-server")
 # 全局变量保存URL前缀
 url_prefix = ""
 
-# 创建Flask应用
-app = Flask(__name__, template_folder="templates")
+# 获取模板文件夹路径
+def get_template_folder():
+    """获取模板文件夹的绝对路径，兼容开发和打包环境"""
+    # 首先尝试相对于当前文件的路径（开发环境）
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    template_dir = os.path.join(current_dir, "templates")
+    
+    if os.path.exists(template_dir):
+        return template_dir
+    
+    # 如果是打包后的环境，尝试在可执行文件目录中查找
+    if hasattr(sys, '_MEIPASS'):  # PyInstaller
+        template_dir = os.path.join(sys._MEIPASS, "mcp_shell_server", "templates")
+    elif hasattr(sys, 'frozen'):  # 其他打包工具，包括 Nuitka
+        # 获取可执行文件所在目录
+        exe_dir = os.path.dirname(sys.executable)
+        template_dir = os.path.join(exe_dir, "mcp_shell_server", "templates")
+        
+        # 如果在可执行文件目录找不到，尝试在内置数据路径
+        if not os.path.exists(template_dir):
+            # Nuitka 的数据文件路径
+            import pkg_resources
+            try:
+                template_dir = pkg_resources.resource_filename('mcp_shell_server', 'templates')
+            except:
+                # 最后的备选方案：当前工作目录
+                template_dir = os.path.join(os.getcwd(), "mcp_shell_server", "templates")
+    
+    return template_dir
+
+# 创建Flask应用，使用动态模板路径
+template_folder = get_template_folder()
+logger.info(f"模板文件夹路径: {template_folder}")
+logger.info(f"模板文件夹是否存在: {os.path.exists(template_folder)}")
+if os.path.exists(template_folder):
+    logger.info(f"模板文件夹内容: {os.listdir(template_folder)}")
+
+app = Flask(__name__, template_folder=template_folder)
 
 # 获取全局进程管理器
 from .shell_executor import default_shell_executor
@@ -336,13 +373,11 @@ def start_web_interface(host="0.0.0.0", port=5000, debug=False, prefix=""):
 
     if prefix:
         # 创建带有URL前缀的新应用
-        application = Flask(__name__, template_folder="templates")
+        application = Flask(__name__, template_folder=template_folder)
 
         # 设置静态文件路径
         application.static_url_path = f"{prefix}/static"
-        application.static_folder = os.path.join(
-            os.path.dirname(__file__), "templates/static"
-        )
+        application.static_folder = os.path.join(template_folder, "static")
 
         # 注册所有路由
         for rule in app.url_map.iter_rules():

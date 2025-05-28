@@ -103,6 +103,8 @@ def main():
         "--assume-yes-for-downloads",  # 自动下载所需组件
         "--include-package=mcp_shell_server",  # 包含主包
         f"--jobs={args.jobs}",  # 设置并行编译的任务数量
+        # 包含模板文件
+        "--include-data-dir=src/mcp_shell_server/templates=mcp_shell_server/templates",
     ]
     
     # 快速构建模式减少优化级别
