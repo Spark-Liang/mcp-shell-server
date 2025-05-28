@@ -92,6 +92,40 @@ packages = ["src/mcp_shell_server"]
 [tool.hatch.metadata]
 allow-direct-references = true
 
+# 定义全局命令映射
+[tool.hatch.envs.default.scripts]
+test = "hatch -e test run test"
+format = "hatch -e dev run format"
+lint = "hatch -e dev run lint"
+typecheck = "hatch -e dev run typecheck"
+coverage = "hatch -e test run coverage"
+check = "hatch -e dev run check"
+fix = "hatch -e dev run fix"
+all = "hatch -e dev run all"
+
+[tool.hatch.envs.test]
+features = ["test"]
+
+[tool.hatch.envs.test.scripts]
+test = "pytest {args:tests/}"
+coverage = "pytest --cov=src/mcp_shell_server tests"
+
+[tool.hatch.envs.dev]
+features = ["dev"]
+
+[tool.hatch.envs.dev.scripts]
+format-black = "black ."
+format-isort = "isort ."
+format-ruff = "ruff check --fix ."
+format = ["format-black", "format-isort", "format-ruff"]
+lint-black = "black --check ."
+lint-isort = "isort --check ."
+lint-ruff = "ruff check ."
+lint = ["lint-black", "lint-isort", "lint-ruff"]
+typecheck = "mypy src/mcp_shell_server tests"
+check = ["lint", "typecheck"]
+fix = ["check", "format"]
+all = ["format", "check", "coverage"]
 
 [tool.coverage.report]
 exclude_lines = [
@@ -114,3 +148,5 @@ omit = [
     "src/mcp_shell_server/__init__.py",
     "src/mcp_shell_server/version.py",
 ]
+
+
